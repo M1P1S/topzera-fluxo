@@ -368,7 +368,7 @@ async function deletarReceita(id){
 // CALCULOS
 // ============================================================
 function calcTotais(){
-  const fatVendas=lancamentos.reduce((a,l)=>a+(+l.dinheiro||0)+(+l.pix||0)+(+l.credito||0),0);
+  const fatVendas=lancamentos.reduce((a,l)=>a+(+l.dinheiro||0)+(+l.pix||0)+(+l.debito||0)+(+l.credito||0),0);
   const fatPlat=receitas.reduce((a,r)=>a+(+r.valor||0),0);
   const totalFat=fatVendas+fatPlat;
   const totalReinvest=fatVendas*REINVEST; // reinvestimento só sobre vendas da loja
@@ -381,13 +381,13 @@ function calcTotais(){
 
 function fatSemana(num){
   const sem=SEMANAS.find(s=>s.num===num);
-  return lancamentos.filter(l=>sem.dias.includes(diaNum(l.data))).reduce((a,l)=>a+(+l.dinheiro||0)+(+l.pix||0)+(+l.credito||0),0);
+  return lancamentos.filter(l=>sem.dias.includes(diaNum(l.data))).reduce((a,l)=>a+(+l.dinheiro||0)+(+l.pix||0)+(+l.debito||0)+(+l.credito||0),0);
 }
 
 function fatHoje(){
   const l=lancamentos.find(x=>x.data===hoje());
   if(!l)return 0;
-  return(+l.dinheiro||0)+(+l.pix||0)+(+l.credito||0);
+  return(+l.dinheiro||0)+(+l.pix||0)+(+l.debito||0)+(+l.credito||0);
 }
 
 // ============================================================
@@ -492,7 +492,8 @@ function renderLancar(){
     <div class="sec">Registrar venda da loja</div>
     <div class="field"><label>Data</label><input type="date" id="inputData" value="${hoje()}"></div>
     <div class="field"><label>💵 Dinheiro (espécie)</label><input type="number" id="inputDin" placeholder="0.00" step="0.01" min="0" inputmode="decimal"></div>
-    <div class="field"><label>📱 Pix + Débito</label><input type="number" id="inputPix" placeholder="0.00" step="0.01" min="0" inputmode="decimal"></div>
+    <div class="field"><label>📱 Pix</label><input type="number" id="inputPix" placeholder="0.00" step="0.01" min="0" inputmode="decimal"></div>
+    <div class="field"><label>💳 Débito</label><input type="number" id="inputDeb" placeholder="0.00" step="0.01" min="0" inputmode="decimal"></div>
     <div class="field"><label>💳 Cartão Crédito</label><input type="number" id="inputCred" placeholder="0.00" step="0.01" min="0" inputmode="decimal"></div>
     <div class="msg" id="lancMsg"></div>
     <button class="btn btn-primary" onclick="lancar()" style="margin-bottom:12px;">➕ Registrar venda</button>
@@ -527,7 +528,7 @@ function renderLancar(){
         return`<div class="list-item">
           <div class="list-item-info">
             <div class="list-item-title">${label}</div>
-            <div class="list-item-sub">💵${fmt(+l.dinheiro||0)} 📱${fmt(+l.pix||0)} 💳${fmt(+l.credito||0)}</div>
+            <div class="list-item-sub">💵${fmt(+l.dinheiro||0)} 📱${fmt(+l.pix||0)} 🔵${fmt(+l.debito||0)} 💳${fmt(+l.credito||0)}</div>
             <div class="list-item-sub" style="color:var(--yellow);">Reinvest: ${fmt(reinv)}</div>
           </div>
           <div style="text-align:right;">
@@ -543,14 +544,15 @@ async function lancar(){
   const data=document.getElementById('inputData').value||hoje();
   const dinheiro=parseFloat(document.getElementById('inputDin').value)||0;
   const pix=parseFloat(document.getElementById('inputPix').value)||0;
+  const debito=parseFloat(document.getElementById('inputDeb').value)||0;
   const credito=parseFloat(document.getElementById('inputCred').value)||0;
-  if(dinheiro+pix+credito<=0){showMsg('lancMsg','⚠️ Informe pelo menos um valor.','red');return;}
+  if(dinheiro+pix+debito+credito<=0){showMsg('lancMsg','⚠️ Informe pelo menos um valor.','red');return;}
   const existente=lancamentos.find(l=>l.data===data);
   let lancamento;
   if(existente){
-    lancamento={id:existente.id,data,dinheiro:(+existente.dinheiro||0)+dinheiro,pix:(+existente.pix||0)+pix,credito:(+existente.credito||0)+credito,mes_ano:MES_ANO};
+    lancamento={id:existente.id,data,dinheiro:(+existente.dinheiro||0)+dinheiro,pix:(+existente.pix||0)+pix,debito:(+existente.debito||0)+debito,credito:(+existente.credito||0)+credito,mes_ano:MES_ANO};
   }else{
-    lancamento={data,dinheiro,pix,credito,mes_ano:MES_ANO};
+    lancamento={data,dinheiro,pix,debito,credito,mes_ano:MES_ANO};
   }
   showMsg('lancMsg','⏳ Salvando...','yellow');
   const ok=await salvarLancamento(lancamento);
@@ -559,6 +561,7 @@ async function lancar(){
     await carregarDados();
     document.getElementById('inputDin').value='';
     document.getElementById('inputPix').value='';
+    document.getElementById('inputDeb').value='';
     document.getElementById('inputCred').value='';
   }else{
     if(existente){existente.dinheiro=lancamento.dinheiro;existente.pix=lancamento.pix;existente.credito=lancamento.credito;}
