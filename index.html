@@ -538,7 +538,7 @@ function renderLancar(){
     ${lancamentos.length===0
       ?'<div class="empty">Nenhum lançamento ainda.</div>'
       :lancamentos.slice().reverse().map(l=>{
-        const fat=(+l.dinheiro||0)+(+l.pix||0)+(+l.credito||0);
+        const fat=(+l.dinheiro||0)+(+l.pix||0)+(+l.debito||0)+(+l.credito||0);
         const reinv=fat*REINVEST;
         const d=new Date(l.data+'T12:00:00');
         const label=d.toLocaleDateString('pt-BR',{weekday:'short',day:'2-digit',month:'2-digit'});
@@ -546,7 +546,7 @@ function renderLancar(){
           <div class="list-item-info">
             <div class="list-item-title">${label}</div>
             <div class="list-item-sub">💵 ${fmt(+l.dinheiro||0)} · 📱 ${fmt(+l.pix||0)} · 🔵 ${fmt(+l.debito||0)} · 💳 ${fmt(+l.credito||0)}</div>
-            <div class="list-item-sub" style="color:var(--yellow);">Reinvest: ${fmt(Math.round(reinv*100)/100)}</div>
+            <div class="list-item-sub" style="color:var(--yellow);">Reinvest: ${fmt(Math.round(fat*REINVEST*100)/100)}</div>
           </div>
           <div style="text-align:right;">
             <div class="list-item-val" style="color:var(--green);">${fmt(fat)}</div>
