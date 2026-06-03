@@ -371,7 +371,7 @@ function calcTotais(){
   const fatVendas=lancamentos.reduce((a,l)=>a+(+l.dinheiro||0)+(+l.pix||0)+(+l.debito||0)+(+l.credito||0),0);
   const fatPlat=receitas.reduce((a,r)=>a+(+r.valor||0),0);
   const totalFat=fatVendas+fatPlat;
-  const totalReinvest=fatVendas*REINVEST; // reinvestimento só sobre vendas da loja
+  const totalReinvest=Math.round(fatVendas*REINVEST*100)/100; // reinvestimento só sobre vendas da loja
   const totalLiquido=fatVendas-totalReinvest;
   const totalDesp=getDespesas().reduce((a,d)=>a+d.val,0);
   const totalDespPagas=getDespesas().filter(d=>pagamentos[`${d.dia}-${d.desc}`]).reduce((a,d)=>a+d.val,0);
@@ -529,7 +529,7 @@ function renderLancar(){
           <div class="list-item-info">
             <div class="list-item-title">${label}</div>
             <div class="list-item-sub">💵${fmt(+l.dinheiro||0)} 📱${fmt(+l.pix||0)} 🔵${fmt(+l.debito||0)} 💳${fmt(+l.credito||0)}</div>
-            <div class="list-item-sub" style="color:var(--yellow);">Reinvest: ${fmt(reinv)}</div>
+            <div class="list-item-sub" style="color:var(--yellow);">Reinvest: ${fmt(Math.round(reinv*100)/100)}</div>
           </div>
           <div style="text-align:right;">
             <div class="list-item-val" style="color:var(--green);">${fmt(fat)}</div>
@@ -625,7 +625,7 @@ function renderSemanas(){
   let html='';
   SEMANAS.forEach(sem=>{
     const fatSem=fatSemana(sem.num);
-    const reinvSem=fatSem*REINVEST;
+    const reinvSem=Math.round(fatSem*REINVEST*100)/100;
     const liqSem=fatSem-reinvSem;
     const despSem=getDespesas().filter(d=>d.sem===sem.num);
     const totalDespSem=despSem.reduce((a,d)=>a+d.val,0);
