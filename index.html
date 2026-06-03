@@ -324,7 +324,14 @@ let editDespIdx=null;
 let editLancId=null;
 let saidas=[];
 
-function getDespesas(){return[...DESPESAS_PADRAO,...despesasExtra];}
+function getDespesas(){
+  // Merge: despesas padrão com overrides aplicados + extras customizadas
+  const overrides={};
+  despesasExtra.forEach(d=>{ if(d._override && d._origDesc) overrides[d._origDesc]=d; });
+  const base = DESPESAS_PADRAO.map(d=> overrides[d.desc] ? {...overrides[d.desc]} : d);
+  const custom = despesasExtra.filter(d=>!d._override);
+  return [...base, ...custom];
+}
 
 // ============================================================
 // UTILS
@@ -854,7 +861,7 @@ function renderConfig(){
           <div class="list-item-val" style="color:var(--red);">${fmt(d.val)}</div>
           <div style="display:flex;gap:6px;">
             <button class="btn btn-sm btn-yellow-sm" onclick="event.stopPropagation();editarDesp(${i})">✏️</button>
-            ${i>=DESPESAS_PADRAO.length?`<button class="btn btn-sm btn-danger-sm" onclick="event.stopPropagation();excluirDespExtra(${i-DESPESAS_PADRAO.length})">✕</button>`:''}
+            ${(()=>{const todas=getDespesas();const d=todas[i];const customs=despesasExtra.filter(x=>!x._override);const customIdx=customs.indexOf(d);return customIdx>=0?`<button class="btn btn-sm btn-danger-sm" onclick="event.stopPropagation();excluirDespExtra(${customIdx})">✕</button>`:'';})()}
           </div>
         </div>
       </div>
@@ -939,18 +946,24 @@ function salvarDesp(){
     const todas=getDespesas();
     const d=todas[editDespIdx];
     if(editDespIdx<DESPESAS_PADRAO.length){
-      // Editar despesa padrão — salvar override em extra
-      const existeIdx=despesasExtra.findIndex(x=>x.desc===d.desc&&x._override);
-      const novo={...d,desc,val,dia,sem,cat,_override:true,_origDesc:d.desc};
-      if(existeIdx>=0)despesasExtra[existeIdx]=novo;
-      else despesasExtra.push(novo);
-      // Marcar padrão como editado
-      DESPESAS_PADRAO[editDespIdx]={...DESPESAS_PADRAO[editDespIdx],desc,val,dia,sem,cat};
+      // Editar despesa padrão — salvar/atualizar override em extra
+      const existeIdx=despesasExtra.findIndex(x=>x._override && x._origDesc===d._origDesc||x._override && x._origDesc===DESPESAS_PADRAO[editDespIdx].desc);
+      const origDesc=DESPESAS_PADRAO[editDespIdx].desc;
+      const novo={desc,val,dia,sem,cat,_override:true,_origDesc:origDesc,editavel:true};
+      if(existeIdx>=0){
+        despesasExtra[existeIdx]=novo;
+      }else{
+        despesasExtra.push(novo);
+      }
     }else{
+      // Editar despesa extra
       const extraIdx=editDespIdx-DESPESAS_PADRAO.length;
-      despesasExtra[extraIdx]={...despesasExtra[extraIdx],desc,val,dia,sem,cat};
+      const extras=despesasExtra.filter(d=>!d._override);
+      const realIdx=despesasExtra.indexOf(extras[extraIdx]);
+      if(realIdx>=0) despesasExtra[realIdx]={...despesasExtra[realIdx],desc,val,dia,sem,cat};
     }
   }else{
+    // Nova despesa customizada
     despesasExtra.push({desc,val,dia,sem,cat,editavel:true,_custom:true});
   }
 
@@ -961,7 +974,13 @@ function salvarDesp(){
 
 function excluirDespExtra(extraIdx){
   if(confirm('Excluir esta despesa?')){
-    despesasExtra.splice(extraIdx,1);
+    // extraIdx é relativo às despesas customizadas (não overrides)
+    const customs=despesasExtra.filter(d=>!d._override);
+    const item=customs[extraIdx];
+    if(item){
+      const realIdx=despesasExtra.indexOf(item);
+      if(realIdx>=0) despesasExtra.splice(realIdx,1);
+    }
     localStorage.setItem('tz_desp_extra',JSON.stringify(despesasExtra));
     renderAll();
   }
