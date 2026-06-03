@@ -224,6 +224,32 @@
     <button class="btn btn-outline" onclick="fecharModal('modalEditLanc')">Cancelar</button>
   </div>
 </div>
+
+<!-- MODAL NOVA SAÍDA VARIÁVEL -->
+<div class="modal-overlay" id="modalSaida">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="modalSaidaTitle">Registrar Saída</div>
+    <div class="field"><label>Descrição</label><input type="text" id="saidaDesc" placeholder="Ex: Gasolina, Embalagem..."></div>
+    <div class="field"><label>Valor (R$)</label><input type="number" id="saidaVal" placeholder="0.00" step="0.01" inputmode="decimal"></div>
+    <div class="field"><label>Data</label><input type="date" id="saidaData"></div>
+    <div class="field">
+      <label>Categoria</label>
+      <select id="saidaCat">
+        <option value="Variável">Variável</option>
+        <option value="Loja">Loja</option>
+        <option value="Pessoal">Pessoal</option>
+        <option value="Estoque">Estoque</option>
+        <option value="Transporte">Transporte</option>
+        <option value="Alimentação">Alimentação</option>
+      </select>
+    </div>
+    <div class="field"><label>Observação (opcional)</label><input type="text" id="saidaObs" placeholder="Detalhes..."></div>
+    <div class="msg" id="saidaMsg"></div>
+    <button class="btn btn-primary" onclick="salvarSaida()" style="margin-bottom:10px;">✓ Registrar saída</button>
+    <button class="btn btn-outline" onclick="fecharModal('modalSaida')">Cancelar</button>
+  </div>
+</div>
 <script>
 // ============================================================
 // SUPABASE
@@ -296,6 +322,7 @@ let receitas=[];
 let deleteId=null;
 let editDespIdx=null;
 let editLancId=null;
+let saidas=[];
 
 function getDespesas(){return[...DESPESAS_PADRAO,...despesasExtra];}
 
@@ -323,16 +350,19 @@ async function carregarDados(){
     const lancs = await sbFetch(`lancamentos?mes_ano=eq.${MES_ANO}&order=data.asc`).catch(()=>[]);
     const pags  = await sbFetch(`pagamentos?mes_ano=eq.${MES_ANO}`).catch(()=>[]);
     const recs  = await sbFetch(`receitas?mes_ano=eq.${MES_ANO}&order=data.asc`).catch(()=>[]);
+    const sais  = await sbFetch(`saidas?mes_ano=eq.${MES_ANO}&order=data.asc`).catch(()=>[]);
     lancamentos = Array.isArray(lancs) ? lancs : [];
     pagamentos  = {};
     (Array.isArray(pags)?pags:[]).forEach(p=>{pagamentos[`${p.dia}-${p.descricao}`]=p.pago;});
     receitas    = Array.isArray(recs) ? recs : [];
+    saidas      = Array.isArray(sais) ? sais : [];
     setSyncBadge('ok');
   }catch(e){
     console.error(e);setSyncBadge('err');
     lancamentos=JSON.parse(localStorage.getItem('tz_lanc')||'[]');
     pagamentos=JSON.parse(localStorage.getItem('tz_pag')||'{}');
     receitas=JSON.parse(localStorage.getItem('tz_rec')||'[]');
+    saidas=JSON.parse(localStorage.getItem('tz_saidas')||'[]');
   }
   renderAll();
 }
@@ -392,8 +422,9 @@ function calcTotais(){
   const totalLiquido=fatVendas-totalReinvest;
   const totalDesp=getDespesas().reduce((a,d)=>a+d.val,0);
   const totalDespPagas=getDespesas().filter(d=>pagamentos[`${d.dia}-${d.desc}`]).reduce((a,d)=>a+d.val,0);
-  const saldoAtual=SALDO_INI+totalLiquido+fatPlat-totalDespPagas;
-  return{fatVendas,fatPlat,totalFat,totalReinvest,totalLiquido,totalDesp,totalDespPagas,saldoAtual};
+  const totalSaidas=saidas.reduce((a,s)=>a+(+s.valor||0),0);
+  const saldoAtual=SALDO_INI+totalLiquido+fatPlat-totalDespPagas-totalSaidas;
+  return{fatVendas,fatPlat,totalFat,totalReinvest,totalLiquido,totalDesp,totalDespPagas,totalSaidas,saldoAtual};
 }
 
 function fatSemana(num){
@@ -533,6 +564,24 @@ function renderLancar(){
           </div>
         </div>`).join('')}
 
+    <div class="divider"></div>
+    <div class="sec" style="margin-top:8px;">
+      Saídas / Despesas variáveis
+      <button class="btn btn-sm btn-danger-sm" onclick="abrirModalSaida()">+ Nova</button>
+    </div>
+    ${saidas.length===0
+      ?'<div class="empty" style="margin-bottom:16px;">Nenhuma saída registrada.</div>'
+      :saidas.slice().reverse().map(s=>`
+        <div class="list-item">
+          <div class="list-item-info">
+            <div class="list-item-title">${s.descricao}</div>
+            <div class="list-item-sub">${s.data} · <span class="badge badge-purple">${s.categoria}</span>${s.obs?' · '+s.obs:''}</div>
+          </div>
+          <div style="text-align:right;">
+            <div class="list-item-val" style="color:var(--red);">– ${fmt(+s.valor)}</div>
+            <button class="btn btn-sm btn-danger-sm" style="margin-top:4px;" onclick="deletarSaida('${s.id}')">✕</button>
+          </div>
+        </div>`).join('')}
     <div class="divider"></div>
     <div class="sec">Lançamentos de vendas</div>
     ${lancamentos.length===0
@@ -680,6 +729,47 @@ async function salvarRec(){
 }
 
 // ============================================================
+// SAÍDAS VARIÁVEIS
+// ============================================================
+function abrirModalSaida(){
+  document.getElementById('saidaDesc').value='';
+  document.getElementById('saidaVal').value='';
+  document.getElementById('saidaData').value=hoje();
+  document.getElementById('saidaCat').value='Variável';
+  document.getElementById('saidaObs').value='';
+  document.getElementById('saidaMsg').textContent='';
+  document.getElementById('modalSaida').classList.add('open');
+}
+
+async function salvarSaida(){
+  const descricao=document.getElementById('saidaDesc').value.trim();
+  const valor=parseFloat(document.getElementById('saidaVal').value)||0;
+  const data=document.getElementById('saidaData').value||hoje();
+  const categoria=document.getElementById('saidaCat').value;
+  const obs=document.getElementById('saidaObs').value.trim();
+  if(!descricao||valor<=0){showMsg('saidaMsg','⚠️ Preencha descrição e valor.','red');return;}
+  showMsg('saidaMsg','⏳ Salvando...','yellow');
+  try{
+    const res=await sbFetch('saidas',{method:'POST',headers:{'Prefer':'resolution=merge-duplicates,return=representation'},body:JSON.stringify({descricao,valor,data,categoria,obs,mes_ano:MES_ANO})});
+    saidas.push(...(Array.isArray(res)?res:[{id:Date.now().toString(),descricao,valor,data,categoria,obs,mes_ano:MES_ANO}]));
+    showMsg('saidaMsg','✓ Saída registrada!','green');
+    setTimeout(()=>{fecharModal('modalSaida');renderAll();},800);
+  }catch(e){
+    saidas.push({id:Date.now().toString(),descricao,valor,data,categoria,obs,mes_ano:MES_ANO});
+    localStorage.setItem('tz_saidas',JSON.stringify(saidas));
+    showMsg('saidaMsg','⚠️ Salvo localmente','yellow');
+    setTimeout(()=>{fecharModal('modalSaida');renderAll();},800);
+  }
+}
+
+async function deletarSaida(id){
+  saidas=saidas.filter(s=>s.id!==id);
+  renderAll();
+  try{await sbFetch(`saidas?id=eq.${id}`,{method:'DELETE'});}
+  catch(e){localStorage.setItem('tz_saidas',JSON.stringify(saidas));}
+}
+
+// ============================================================
 // SEMANAS
 // ============================================================
 function renderSemanas(){
@@ -793,8 +883,12 @@ function renderResumoMes(){
         <span style="color:var(--yellow);">– ${fmt(t.totalReinvest)}</span>
       </div>
       <div style="display:flex;justify-content:space-between;font-size:12px;padding:6px 0;border-bottom:1px solid var(--border);">
-        <span style="color:var(--text3);">Total despesas</span>
-        <span style="color:var(--red);">– ${fmt(t.totalDesp)}</span>
+        <span style="color:var(--text3);">Saídas variáveis</span>
+        <span style="color:var(--red);">– ${fmt(t.totalSaidas||0)}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:12px;padding:6px 0;border-bottom:1px solid var(--border);">
+        <span style="color:var(--text3);">Despesas fixas pagas</span>
+        <span style="color:var(--red);">– ${fmt(t.totalDespPagas)}</span>
       </div>
       <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:700;padding:8px 0 0;">
         <span>Resultado estimado</span>
