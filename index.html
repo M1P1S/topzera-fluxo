@@ -222,7 +222,10 @@ async function sbFetch(path,options={}){
     headers:{'apikey':SUPABASE_KEY,'Authorization':`Bearer ${SUPABASE_KEY}`,'Content-Type':'application/json','Prefer':'return=representation',...(options.headers||{})}
   });
   const text=await res.text();
-  return text?JSON.parse(text):[];
+  if(!text) return [];
+  const parsed=JSON.parse(text);
+  if(parsed && !Array.isArray(parsed) && parsed.code) throw new Error(parsed.message||'Supabase error');
+  return Array.isArray(parsed)?parsed:[];
 }
 
 // ============================================================
@@ -300,15 +303,13 @@ function setSyncBadge(s){
 async function carregarDados(){
   setSyncBadge('load');
   try{
-    const[lancs,pags,recs]=await Promise.all([
-      sbFetch(`lancamentos?mes_ano=eq.${MES_ANO}&order=data.asc`),
-      sbFetch(`pagamentos?mes_ano=eq.${MES_ANO}`),
-      sbFetch(`receitas?mes_ano=eq.${MES_ANO}&order=data.asc`).catch(()=>[]),
-    ]);
-    lancamentos=lancs||[];
-    pagamentos={};
-    (pags||[]).forEach(p=>{pagamentos[`${p.dia}-${p.descricao}`]=p.pago;});
-    receitas=recs||[];
+    const lancs = await sbFetch(`lancamentos?mes_ano=eq.${MES_ANO}&order=data.asc`).catch(()=>[]);
+    const pags  = await sbFetch(`pagamentos?mes_ano=eq.${MES_ANO}`).catch(()=>[]);
+    const recs  = await sbFetch(`receitas?mes_ano=eq.${MES_ANO}&order=data.asc`).catch(()=>[]);
+    lancamentos = Array.isArray(lancs) ? lancs : [];
+    pagamentos  = {};
+    (Array.isArray(pags)?pags:[]).forEach(p=>{pagamentos[`${p.dia}-${p.descricao}`]=p.pago;});
+    receitas    = Array.isArray(recs) ? recs : [];
     setSyncBadge('ok');
   }catch(e){
     console.error(e);setSyncBadge('err');
