@@ -374,8 +374,12 @@ const KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6
 let token=null,userId=null,perfil={};
 
 async function sbAuth(path,body){
-  const r=await fetch(`${SB}/auth/v1/${path}`,{method:'POST',headers:{'apikey':KEY,'Content-Type':'application/json'},body:JSON.stringify(body)});
-  return r.json();
+  try{
+    const r=await fetch(`${SB}/auth/v1/${path}`,{method:'POST',headers:{'apikey':KEY,'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const text=await r.text();
+    if(!text)return{error:{message:'Sem resposta do servidor'}};
+    return JSON.parse(text);
+  }catch(e){return{error:{message:e.message}};}
 }
 
 async function sb(path,opts={}){
@@ -394,9 +398,12 @@ async function login(){
   const senha=document.getElementById('loginSenha').value;
   if(!email||!senha){showAuthMsg('Preencha e-mail e senha.','err');return;}
   showAuthMsg('Entrando...','load');
-  const r=await sbAuth('token?grant_type=password',{email,password:senha});
-  if(r.error){showAuthMsg(r.error.message||'E-mail ou senha incorretos.','err');return;}
-  await iniciarSessao(r.access_token,r.user);
+  try{
+    const r=await sbAuth('token?grant_type=password',{email,password:senha});
+    if(!r||r.error){showAuthMsg((r&&r.error&&r.error.message)||'E-mail ou senha incorretos.','err');return;}
+    if(!r.access_token||!r.user){showAuthMsg('Erro ao autenticar. Tente novamente.','err');return;}
+    await iniciarSessao(r.access_token,r.user);
+  }catch(e){showAuthMsg('Erro de conexão: '+e.message,'err');}
 }
 
 async function cadastrar(){
@@ -420,6 +427,7 @@ async function cadastrar(){
 }
 
 async function iniciarSessao(tok,user){
+  if(!tok||!user||!user.id){showAuthMsg('Sessão inválida. Tente novamente.','err');return;}
   token=tok;userId=user.id;
   localStorage.setItem('fc_token',tok);
   localStorage.setItem('fc_user',JSON.stringify(user));
@@ -1417,21 +1425,20 @@ document.querySelectorAll('.mo').forEach(m=>{m.addEventListener('click',function
 // ============================================================
 (async()=>{
   const savedToken=localStorage.getItem('fc_token');
-  const savedUser=localStorage.getItem('fc_user');
-  if(savedToken&&savedUser){
+  if(savedToken){
     try{
-      // Verificar se token ainda é válido
       const r=await fetch(`${SB}/auth/v1/user`,{headers:{'apikey':KEY,'Authorization':`Bearer ${savedToken}`}});
       if(r.ok){
         const user=await r.json();
-        token=savedToken;userId=user.id;
-        await iniciarSessao(savedToken,user);
-        return;
+        if(user&&user.id){
+          token=savedToken;userId=user.id;
+          await iniciarSessao(savedToken,user);
+          return;
+        }
       }
     }catch(e){}
     localStorage.removeItem('fc_token');localStorage.removeItem('fc_user');
   }
-  // Mostrar tela de login
   document.getElementById('authScreen').style.display='flex';
 })();
 </script>
