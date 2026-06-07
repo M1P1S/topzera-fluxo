@@ -230,14 +230,14 @@ body{font-family:'DM Mono',monospace;background:var(--bg);color:var(--text);min-
 
   <div class="page active" id="page-dashboard"></div>
   <div class="page" id="page-pdv"></div>
-  <div class="page" id="page-produtos"></div>
+  <div class="page" id="page-lancar"></div>
   <div class="page" id="page-graficos"></div>
   <div class="page" id="page-config"></div>
 
   <div class="bottom-nav">
     <button class="nav-btn active" onclick="showPage('dashboard',this)"><span class="icon">📊</span>Dashboard</button>
     <button class="nav-btn" onclick="showPage('pdv',this)"><span class="icon">🛒</span>PDV</button>
-    <button class="nav-btn" onclick="showPage('produtos',this)"><span class="icon">📦</span>Produtos</button>
+    <button class="nav-btn" onclick="showPage('lancar',this)"><span class="icon">➕</span>Lançar</button>
     <button class="nav-btn" onclick="showPage('graficos',this)"><span class="icon">📈</span>Gráficos</button>
     <button class="nav-btn" onclick="showPage('config',this)"><span class="icon">⚙️</span>Gestão</button>
   </div>
@@ -662,9 +662,56 @@ function renderAll(){const a=document.querySelector('.page.active');if(a)renderP
 function renderPage(id){
   if(id==='dashboard')renderDashboard();
   else if(id==='pdv')renderPDV();
-  else if(id==='produtos')renderProdutos();
+  else if(id==='lancar')renderLancar();
   else if(id==='graficos')renderGraficos();
   else if(id==='config')renderConfig();
+}
+
+function renderLancar(){
+  document.getElementById('page-lancar').innerHTML=`
+    <div class="sec">Entrada manual de vendas</div>
+    <div class="alert alert-blue" style="margin-bottom:12px;">Use para registrar vendas do dia quando não usar o PDV, ou para lançar valores retroativos.</div>
+    <div class="field"><label>Data</label><input type="date" id="lancData" value="${hoje()}"></div>
+    <div class="field"><label>💵 Dinheiro</label><input type="number" id="lancDin" placeholder="0.00" step="0.01" inputmode="decimal"></div>
+    <div class="field"><label>📱 Pix</label><input type="number" id="lancPix" placeholder="0.00" step="0.01" inputmode="decimal"></div>
+    <div class="field"><label>🔵 Débito</label><input type="number" id="lancDeb" placeholder="0.00" step="0.01" inputmode="decimal"></div>
+    <div class="field"><label>💳 Crédito</label><input type="number" id="lancCred" placeholder="0.00" step="0.01" inputmode="decimal"></div>
+    <div class="msg" id="lancMsg"></div>
+    <button class="btn btn-primary" onclick="salvarLanc()" style="margin-bottom:16px;">➕ Registrar entrada</button>
+
+    <div class="divider"></div>
+    <div class="sec">Saídas / Despesas variáveis <button class="btn btn-sm btn-danger-sm" onclick="document.getElementById('moSaida').classList.add('open');document.getElementById('sData').value=hoje();">+ Nova</button></div>
+    ${saidas.length===0?'<div class="empty" style="margin-bottom:12px;">Nenhuma saída registrada.</div>'
+      :saidas.slice().reverse().map(s=>\`<div class="li">
+        <div class="li-info"><div class="li-title">\${s.descricao}</div><div class="li-sub">\${s.data} · <span class="badge bg-purple">\${s.categoria}</span></div></div>
+        <div style="text-align:right;"><div class="li-val" style="color:var(--red);">– \${fmt(+s.valor)}</div>
+        <button class="btn btn-sm btn-danger-sm" style="margin-top:4px;" onclick="deletarSaida('\${s.id}')">✕</button></div>
+      </div>\`).join('')}
+
+    <div class="divider"></div>
+    <div class="sec">Histórico de entradas manuais</div>
+    \${lancamentos.length===0?'<div class="empty">Nenhum lançamento ainda.</div>'
+      :lancamentos.slice().reverse().map(l=>{
+        const fat=(+l.dinheiro||0)+(+l.pix||0)+(+l.debito||0)+(+l.credito||0);
+        const reinv=Math.round(fat*REINVEST*100)/100;
+        const d=new Date(l.data+'T12:00:00');
+        const label=d.toLocaleDateString('pt-BR',{weekday:'short',day:'2-digit',month:'2-digit'});
+        return\`<div class="li">
+          <div class="li-info">
+            <div class="li-title">\${label}</div>
+            <div class="li-sub">💵\${fmt(+l.dinheiro||0)} 📱\${fmt(+l.pix||0)} 🔵\${fmt(+l.debito||0)} 💳\${fmt(+l.credito||0)}</div>
+            <div class="li-sub" style="color:var(--yellow);">Reinvest: \${fmt(reinv)}</div>
+          </div>
+          <div style="text-align:right;">
+            <div class="li-val" style="color:var(--green);">\${fmt(fat)}</div>
+            <div style="display:flex;gap:5px;margin-top:4px;justify-content:flex-end;">
+              <button class="btn btn-sm btn-yellow-sm" onclick="abrirEditLanc('\${l.id}')">✏️</button>
+              <button class="btn btn-sm btn-danger-sm" onclick="deletarLanc('\${l.id}')">✕</button>
+            </div>
+          </div>
+        </div>\`;
+      }).join('')}
+  \`;
 }
 
 // ============================================================
@@ -1364,6 +1411,32 @@ function salvarDesp(idx){
   localStorage.setItem(`fc_desp_${userId}`,JSON.stringify(despesasExtra));
   showMsg('dMsg','✓ Salvo!','ok');
   setTimeout(()=>{fecharMo('moConfig');renderAll();},700);
+}
+
+async function deletarSaida(id){
+  saidas=saidas.filter(s=>s.id!==id);
+  renderAll();
+  try{await sb(`saidas?id=eq.${id}`,{method:'DELETE'});}catch(e){}
+}
+
+async function deletarLanc(id){
+  lancamentos=lancamentos.filter(l=>l.id!==id);
+  renderAll();
+  try{await sb(`lancamentos?id=eq.${id}`,{method:'DELETE'});}catch(e){}
+}
+
+function abrirEditLanc(id){
+  const l=lancamentos.find(x=>x.id===id);if(!l)return;
+  // Reusar modal moLancar para edição
+  document.getElementById('lancData').value=l.data;
+  document.getElementById('lancDin').value=+l.dinheiro||0;
+  document.getElementById('lancPix').value=+l.pix||0;
+  document.getElementById('lancDeb').value=+l.debito||0;
+  document.getElementById('lancCred').value=+l.credito||0;
+  document.getElementById('lancMsg').textContent='';
+  // Guardar id para edição
+  document.getElementById('lancData').dataset.editId=id;
+  document.getElementById('moLancar').classList.add('open');
 }
 
 async function togglePago(dia,desc){
