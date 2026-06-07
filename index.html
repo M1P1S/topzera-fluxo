@@ -421,7 +421,7 @@ async function cadastrar(){
   if(r.access_token){
     await iniciarSessao(r.access_token,r.user);
   }else{
-    showAuthMsg('✓ Conta criada! Verifique seu e-mail para confirmar e depois faça login.','ok');
+    showAuthMsg('✅ Conta criada com sucesso! Verifique seu e-mail <strong>' + email + '</strong> e clique no link de confirmação antes de fazer login.','ok');
     authTab('login',null);
   }
 }
