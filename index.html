@@ -682,11 +682,11 @@ function renderLancar(){
     <div class="divider"></div>
     <div class="sec">Saídas / Despesas variáveis <button class="btn btn-sm btn-danger-sm" onclick="document.getElementById('moSaida').classList.add('open');document.getElementById('sData').value=hoje();">+ Nova</button></div>
     ${saidas.length===0?'<div class="empty" style="margin-bottom:12px;">Nenhuma saída registrada.</div>'
-      :saidas.slice().reverse().map(s=>\`<div class="li">
+      :saidas.slice().reverse().map(s=>`<div class="li">
         <div class="li-info"><div class="li-title">\${s.descricao}</div><div class="li-sub">\${s.data} · <span class="badge bg-purple">\${s.categoria}</span></div></div>
         <div style="text-align:right;"><div class="li-val" style="color:var(--red);">– \${fmt(+s.valor)}</div>
         <button class="btn btn-sm btn-danger-sm" style="margin-top:4px;" onclick="deletarSaida('\${s.id}')">✕</button></div>
-      </div>\`).join('')}
+      </div>`).join('')}
 
     <div class="divider"></div>
     <div class="sec">Histórico de entradas manuais</div>
@@ -696,7 +696,7 @@ function renderLancar(){
         const reinv=Math.round(fat*REINVEST*100)/100;
         const d=new Date(l.data+'T12:00:00');
         const label=d.toLocaleDateString('pt-BR',{weekday:'short',day:'2-digit',month:'2-digit'});
-        return\`<div class="li">
+        return`<div class="li">
           <div class="li-info">
             <div class="li-title">\${label}</div>
             <div class="li-sub">💵\${fmt(+l.dinheiro||0)} 📱\${fmt(+l.pix||0)} 🔵\${fmt(+l.debito||0)} 💳\${fmt(+l.credito||0)}</div>
@@ -709,9 +709,9 @@ function renderLancar(){
               <button class="btn btn-sm btn-danger-sm" onclick="deletarLanc('\${l.id}')">✕</button>
             </div>
           </div>
-        </div>\`;
+        </div>`;
       }).join('')}
-  \`;
+  `;
 }
 
 // ============================================================
