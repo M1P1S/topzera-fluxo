@@ -646,7 +646,6 @@ function renderDashboard() {
   if (t.totalFat >= t.metaMes) alertas += '<div class="alert alert-green">Meta do mes atingida!</div>';
   var resumoRows = [
     ['Saldo inicial (' + saldoInicial.data + ')', fmt(saldoInicial.valor), 'var(--text2)'],
-    ['Saldo inicial (' + saldoInicial.data + ')', fmt(saldoInicial.valor), 'var(--text2)'],
       ['Vendas PDV', fmt(t.fatPDV), 'var(--green)'],
     ['Entradas manuais', fmt(t.fatVendas), 'var(--green)'],
     ['Receitas externas', fmt(t.fatPlat), 'var(--green)'],
