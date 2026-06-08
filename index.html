@@ -290,6 +290,28 @@ body{font-family:"DM Mono",monospace;background:var(--bg);color:var(--text);min-
     <div id="moConfigContent"></div>
   </div>
 </div>
+<div class="mo" id="moReinvest">
+  <div class="mo-body">
+    <div class="mo-handle"></div>
+    <div class="mo-title">Registrar Reinvestimento</div>
+    <div class="alert alert-yellow" style="margin-bottom:12px;" id="moReinvestSaldo"></div>
+    <div class="field"><label>Tipo</label>
+      <select id="reinvestTipo">
+        <option value="sangria">Sangria do caixa (dinheiro)</option>
+        <option value="transferencia">Transferencia / Pix</option>
+      </select>
+    </div>
+    <div class="field"><label>Valor (R$)</label><input type="number" id="reinvestVal" placeholder="0.00" step="0.01" inputmode="decimal"></div>
+    <div class="field"><label>Data</label><input type="date" id="reinvestData"></div>
+    <div class="field"><label>Descricao / O que comprou</label><input type="text" id="reinvestDesc" placeholder="Ex: Papeis A4, Canetas BIC..."></div>
+    <div class="field"><label>Fornecedor (opcional)</label><input type="text" id="reinvestForn" placeholder="Ex: Kalunga, Atacado..."></div>
+    <div class="field"><label>Observacao</label><input type="text" id="reinvestObs" placeholder="Opcional"></div>
+    <div class="msg" id="reinvestMsg"></div>
+    <button class="btn btn-primary" onclick="salvarReinvest()" style="margin-bottom:8px;">Registrar</button>
+    <button class="btn btn-outline" onclick="fecharMo('moReinvest')">Cancelar</button>
+  </div>
+</div>
+
 <div class="mo" id="moSaida">
   <div class="mo-body">
     <div class="mo-handle"></div>
@@ -437,7 +459,7 @@ function getMesAno() {
 const MES_ANO = getMesAno();
 const REINVEST = 0.35;
 
-let lancamentos = [], pagamentos = {}, receitas = [], saidas = [], vendas = [], produtos = [], categorias = [], fornecedores = [];
+let lancamentos = [], pagamentos = {}, receitas = [], saidas = [], vendas = [], produtos = [], categorias = [], fornecedores = [], reinvestimentos = [];
 let saldoInicial = {valor:0, data:new Date().toISOString().split('T')[0], obs:''};
 let caixaFixoAtual = {valor:0, data:new Date().toISOString().split('T')[0]};
 let despesasExtra = [];
@@ -524,6 +546,7 @@ async function carregarDados() {
       sb('produtos?user_id=eq.' + uid + '&ativo=eq.true&order=nome.asc').catch(function() { return []; }),
       sb('categorias?user_id=eq.' + uid + '&order=nome.asc').catch(function() { return []; }),
       sb('fornecedores?user_id=eq.' + uid + '&order=nome.asc').catch(function() { return []; }),
+      sb('reinvestimentos?user_id=eq.' + uid + '&mes_ano=eq.' + MES_ANO + '&order=data.asc').catch(function() { return []; }),
       sb('configuracoes?user_id=eq.' + uid).catch(function() { return []; }),
       sb('caixa_fixo?user_id=eq.' + uid + '&order=data.desc&limit=1').catch(function() { return []; })
     ]);
@@ -536,8 +559,9 @@ async function carregarDados() {
     produtos = Array.isArray(results[5]) ? results[5] : [];
     categorias = Array.isArray(results[6]) ? results[6] : [];
     fornecedores = Array.isArray(results[7]) ? results[7] : [];
-    var configs = Array.isArray(results[8]) ? results[8] : [];
-    var cf = Array.isArray(results[9]) ? results[9] : [];
+    reinvestimentos = Array.isArray(results[8]) ? results[8] : [];
+    var configs = Array.isArray(results[9]) ? results[9] : [];
+    var cf = Array.isArray(results[10]) ? results[10] : [];
     var si = configs.find(function(c) { return c.chave === 'saldo_inicial'; });
     if (si) {
       try { var d = JSON.parse(si.valor); saldoInicial = {valor:+d.valor || 0, data:d.data || hoje(), obs:d.obs || ''}; }
@@ -558,13 +582,14 @@ function calcTotais() {
   var fatPlat = receitas.reduce(function(a, r) { return a + (+r.valor || 0); }, 0);
   var totalFat = fatVendas + fatPDV + fatPlat;
   var totalReinvest = Math.round((fatVendas + fatPDV) * REINVEST * 100) / 100;
+  var totalReinvestUsado = reinvestimentos.reduce(function(a, r) { return a + (+r.valor || 0); }, 0);
   var totalLiquido = (fatVendas + fatPDV) - totalReinvest;
   var totalDespPagas = getDespesas().filter(function(d) { return pagamentos[d.dia + '-' + d.desc]; }).reduce(function(a, d) { return a + d.val; }, 0);
   var totalSaidas = saidas.reduce(function(a, s) { return a + (+s.valor || 0); }, 0);
   var saldoConta = saldoInicial.valor + totalLiquido + fatPlat - totalDespPagas - totalSaidas;
   var saldoTotal = saldoConta + caixaFixoAtual.valor;
   var metaMes = perfil.meta_mensal || 9500;
-  return {fatVendas:fatVendas, fatPDV:fatPDV, fatPlat:fatPlat, totalFat:totalFat, totalReinvest:totalReinvest, totalLiquido:totalLiquido, totalDespPagas:totalDespPagas, totalSaidas:totalSaidas, saldoConta:saldoConta, saldoTotal:saldoTotal, metaMes:metaMes};
+  return {fatVendas:fatVendas, fatPDV:fatPDV, fatPlat:fatPlat, totalFat:totalFat, totalReinvest:totalReinvest, totalReinvestUsado:totalReinvestUsado, totalLiquido:totalLiquido, totalDespPagas:totalDespPagas, totalSaidas:totalSaidas, saldoConta:saldoConta, saldoTotal:saldoTotal, metaMes:metaMes};
 }
 
 function fatHoje() {
@@ -641,7 +666,7 @@ function renderDashboard() {
     '<div class="card-grid">' +
     '<div class="card ' + (t.saldoTotal >= 500 ? 'green' : t.saldoTotal >= 0 ? 'yellow' : 'red') + '"><div class="cl">Saldo total</div><div class="cv">' + fmtS(t.saldoTotal) + '</div><div class="cs">conta + caixa fixo</div></div>' +
     '<div class="card blue"><div class="cl">Faturamento</div><div class="cv">' + fmt(t.totalFat) + '</div><div class="cs">' + Math.round(pctMes) + '% da meta</div></div>' +
-    '<div class="card yellow"><div class="cl">Reinvestir</div><div class="cv">' + fmt(t.totalReinvest) + '</div><div class="cs">35% das vendas</div></div>' +
+    '<div class="card yellow"><div class="cl">Reinvestir</div><div class="cv">' + fmt(t.totalReinvest) + '</div><div class="cs">Usado: ' + fmt(t.totalReinvestUsado) + ' | Saldo: ' + fmt(Math.max(0, t.totalReinvest - t.totalReinvestUsado)) + '</div></div>' +
     '<div class="card purple"><div class="cl">Caixa fixo</div><div class="cv">' + fmt(caixaFixoAtual.valor) + '</div><div class="cs"><button class="btn btn-sm btn-blue-sm" onclick="abrirConfigModal(&quot;caixaFixo&quot;)">Atualizar</button></div></div>' +
     '</div>' +
     alertas +
@@ -809,6 +834,21 @@ function renderLancar() {
     '</div>';
   }).join('');
 
+  var reinvestHtml = reinvestimentos.length === 0 ? '<div class="empty" style="margin-bottom:12px;">Nenhum reinvestimento registrado.</div>' : reinvestimentos.slice().reverse().map(function(r) {
+    var icone = r.tipo === 'sangria' ? '💵' : '📱';
+    var tipoLabel = r.tipo === 'sangria' ? 'Sangria caixa' : 'Transferencia';
+    return '<div class="li">' +
+      '<div class="li-info">' +
+        '<div class="li-title">' + icone + ' ' + (r.descricao || tipoLabel) + '</div>' +
+        '<div class="li-sub">' + r.data + ' - ' + tipoLabel + (r.fornecedor ? ' - ' + r.fornecedor : '') + '</div>' +
+      '</div>' +
+      '<div style="text-align:right;">' +
+        '<div class="li-val" style="color:var(--yellow);">- ' + fmt(+r.valor) + '</div>' +
+        '<button class="btn btn-sm btn-danger-sm" style="margin-top:4px;" onclick="deletarReinvest(' + JSON.stringify(r.id) + ')">excluir</button>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+
   document.getElementById('page-lancar').innerHTML =
     '<div class="sec">Entrada manual</div>' +
     '<div class="alert alert-blue" style="margin-bottom:12px;">Use para registrar vendas sem o PDV ou valores retroativos.</div>' +
@@ -819,6 +859,14 @@ function renderLancar() {
     '<div class="field"><label>Credito</label><input type="number" id="lancCred" placeholder="0.00" step="0.01" inputmode="decimal"></div>' +
     '<div class="msg" id="lancMsg"></div>' +
     '<button class="btn btn-primary" onclick="salvarLanc()" style="margin-bottom:16px;">Registrar entrada</button>' +
+    '<div class="divider"></div>' +
+    '<div class="sec">Reinvestimento <button class="btn btn-sm btn-yellow-sm" onclick="abrirReinvestModal()">+ Registrar</button></div>' +
+    '<div style="background:var(--yellow-bg);border:1px solid #854d0e;border-radius:var(--r);padding:10px 13px;margin-bottom:10px;font-size:11px;">' +
+    '<div style="display:flex;justify-content:space-between;margin-bottom:4px;"><span style="color:var(--text3);">Disponivel para reinvestir</span><span style="color:var(--yellow);font-weight:700;">' + fmt(calcTotais().totalReinvest) + '</span></div>' +
+    '<div style="display:flex;justify-content:space-between;margin-bottom:4px;"><span style="color:var(--text3);">Ja usado</span><span style="color:var(--red);">' + fmt(calcTotais().totalReinvestUsado) + '</span></div>' +
+    '<div style="display:flex;justify-content:space-between;border-top:1px solid #854d0e;padding-top:4px;margin-top:4px;"><span style="color:var(--text3);font-weight:600;">Saldo reinvest.</span><span style="color:' + (calcTotais().totalReinvest - calcTotais().totalReinvestUsado >= 0 ? 'var(--green)' : 'var(--red)') + ';font-weight:700;">' + fmt(Math.max(0, calcTotais().totalReinvest - calcTotais().totalReinvestUsado)) + '</span></div>' +
+    '</div>' +
+    reinvestHtml +
     '<div class="divider"></div>' +
     '<div class="sec">Saidas <button class="btn btn-sm btn-danger-sm" onclick="abrirSaidaModal()">+ Nova</button></div>' +
     saidaHtml +
@@ -1061,6 +1109,48 @@ async function deletarLanc(id) {
   lancamentos = lancamentos.filter(function(l) { return l.id !== id; });
   renderAll();
   try { await sb('lancamentos?id=eq.' + id, {method:'DELETE'}); } catch(e) {}
+}
+
+function abrirReinvestModal() {
+  var t = calcTotais();
+  var saldo = t.totalReinvest - t.totalReinvestUsado;
+  document.getElementById('moReinvestSaldo').innerHTML =
+    'Disponivel: <strong>' + fmt(t.totalReinvest) + '</strong> | Usado: <strong>' + fmt(t.totalReinvestUsado) + '</strong> | Saldo: <strong style="color:' + (saldo >= 0 ? 'var(--green)' : 'var(--red)') + '">' + fmt(saldo) + '</strong>';
+  document.getElementById('reinvestTipo').value = 'sangria';
+  document.getElementById('reinvestVal').value = '';
+  document.getElementById('reinvestData').value = hoje();
+  document.getElementById('reinvestDesc').value = '';
+  document.getElementById('reinvestForn').value = '';
+  document.getElementById('reinvestObs').value = '';
+  document.getElementById('reinvestMsg').textContent = '';
+  document.getElementById('moReinvest').classList.add('open');
+}
+
+async function salvarReinvest() {
+  var tipo = document.getElementById('reinvestTipo').value;
+  var valor = parseFloat(document.getElementById('reinvestVal').value) || 0;
+  var data = document.getElementById('reinvestData').value || hoje();
+  var desc = document.getElementById('reinvestDesc').value.trim();
+  var forn = document.getElementById('reinvestForn').value.trim();
+  var obs = document.getElementById('reinvestObs').value.trim();
+  if (valor <= 0) { showMsg('reinvestMsg', 'Informe o valor.', 'err'); return; }
+  showMsg('reinvestMsg', 'Salvando...', 'warn');
+  try {
+    var res = await sb('reinvestimentos', {method:'POST', headers:{'Prefer':'return=representation'}, body:JSON.stringify({
+      user_id:userId, data:data, mes_ano:MES_ANO, valor:valor, tipo:tipo,
+      fornecedor:forn, descricao:desc, obs:obs
+    })});
+    if (Array.isArray(res) && res[0]) reinvestimentos.push(res[0]);
+    showMsg('reinvestMsg', 'Registrado!', 'ok');
+    setTimeout(function() { fecharMo('moReinvest'); renderAll(); }, 700);
+  } catch(e) { showMsg('reinvestMsg', 'Erro: ' + e.message, 'err'); }
+}
+
+async function deletarReinvest(id) {
+  if (!confirm('Excluir este reinvestimento?')) return;
+  reinvestimentos = reinvestimentos.filter(function(r) { return r.id !== id; });
+  renderAll();
+  try { await sb('reinvestimentos?id=eq.' + id, {method:'DELETE'}); } catch(e) {}
 }
 
 function abrirSaidaModal() {
