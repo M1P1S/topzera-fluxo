@@ -502,11 +502,14 @@ const SEMANAS = [
   {num:4, label:'Semana 4', periodo:'22 a 30', dias:[22,23,24,25,26,27,28,29,30]}
 ];
 
-function getDespesas() {
+function getDespesas(incluirDesativadas) {
   var ov = {};
   despesasExtra.forEach(function(d) { if (d._override && d._origDesc) ov[d._origDesc] = d; });
   var base = DESPESAS_PADRAO.map(function(d) { return ov[d.desc] ? Object.assign({}, ov[d.desc]) : d; });
   var todas = base.concat(despesasExtra.filter(function(d) { return !d._override; }));
+  if (!incluirDesativadas) {
+    todas = todas.filter(function(d) { return !d._desativada; });
+  }
   return todas.sort(function(a, b) {
     if (a.sem !== b.sem) return a.sem - b.sem;
     return (a.dia || 0) - (b.dia || 0);
@@ -928,12 +931,17 @@ function buildCharts() {
 
 function renderConfig() {
   var t = calcTotais();
-  var despHtml = getDespesas().map(function(d, i) {
-    return '<div class="li" onclick="abrirConfigModal(&quot;editDesp&quot;,' + i + ')" style="cursor:pointer;margin-bottom:6px;">' +
+  var despesasAtivas = getDespesas().filter(function(d) { return !d._desativada; });
+  var despHtml = despesasAtivas.map(function(d, i) {
+    var idxReal = getDespesas().indexOf(d);
+    return '<div class="li" style="margin-bottom:6px;">' +
       '<div class="li-info"><div class="li-title">' + d.desc + '</div><div class="li-sub">Dia ' + (d.dia || 'variavel') + ' - ' + d.cat + ' - Sem. ' + d.sem + '</div></div>' +
       '<div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px;">' +
         '<div class="li-val" style="color:var(--red);">' + fmt(d.val) + '</div>' +
-        '<button class="btn btn-sm btn-yellow-sm" onclick="event.stopPropagation();abrirConfigModal(&quot;editDesp&quot;,' + i + ')">editar</button>' +
+        '<div style="display:flex;gap:4px;">' +
+          '<button class="btn btn-sm btn-yellow-sm" onclick="abrirConfigModal(&quot;editDesp&quot;,' + idxReal + ')">editar</button>' +
+          '<button class="btn btn-sm btn-danger-sm" onclick="excluirDesp(' + idxReal + ',&quot;' + d.desc + '&quot;)">excluir</button>' +
+        '</div>' +
       '</div></div>';
   }).join('');
   var catHtml = categorias.length === 0 ? '<div class="empty" style="margin-bottom:10px;">Nenhuma categoria.</div>' : categorias.map(function(c) { return '<div class="li" style="margin-bottom:6px;"><div class="li-info"><div class="li-title">' + c.nome + '</div></div><button class="btn btn-sm btn-danger-sm" onclick="excluirCategoria(&quot;' + c.id + '&quot;)">excluir</button></div>'; }).join('');
@@ -1337,6 +1345,29 @@ async function excluirFornecedor(id) {
   if (!confirm('Excluir fornecedor?')) return;
   await sb('fornecedores?id=eq.' + id, {method:'DELETE'});
   fornecedores = fornecedores.filter(function(f) { return f.id !== id; });
+  renderAll();
+}
+
+function excluirDesp(idx, desc) {
+  if (!confirm('Excluir "' + desc + '"?\nEla nao aparecera mais nas despesas e semanas.')) return;
+  despesasExtra = JSON.parse(localStorage.getItem('fc_desp_' + userId) || '[]');
+  if (idx < DESPESAS_PADRAO.length) {
+    // Despesa padrao: salvar como desativada via override
+    var origDesc = DESPESAS_PADRAO[idx].desc;
+    var ei = despesasExtra.findIndex(function(x) { return x._override && x._origDesc === origDesc; });
+    var novo = Object.assign({}, DESPESAS_PADRAO[idx], {_override:true, _origDesc:origDesc, _desativada:true});
+    if (ei >= 0) despesasExtra[ei] = novo; else despesasExtra.push(novo);
+    DESPESAS_PADRAO[idx]._desativada = true;
+  } else {
+    // Despesa customizada: remover do array
+    var customs = despesasExtra.filter(function(d) { return !d._override; });
+    var item = customs[idx - DESPESAS_PADRAO.length];
+    if (item) {
+      var ri = despesasExtra.indexOf(item);
+      if (ri >= 0) despesasExtra.splice(ri, 1);
+    }
+  }
+  localStorage.setItem('fc_desp_' + userId, JSON.stringify(despesasExtra));
   renderAll();
 }
 
