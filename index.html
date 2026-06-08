@@ -645,7 +645,9 @@ function renderDashboard() {
   if (proxD.length > 0) alertas += '<div class="alert alert-yellow">' + proxD.length + ' despesa(s) vencem em ate 3 dias - ' + fmt(proxD.reduce(function(a, d) { return a + d.val; }, 0)) + '</div>';
   if (t.totalFat >= t.metaMes) alertas += '<div class="alert alert-green">Meta do mes atingida!</div>';
   var resumoRows = [
-    ['Vendas PDV', fmt(t.fatPDV), 'var(--green)'],
+    ['Saldo inicial (' + saldoInicial.data + ')', fmt(saldoInicial.valor), 'var(--text2)'],
+    ['Saldo inicial (' + saldoInicial.data + ')', fmt(saldoInicial.valor), 'var(--text2)'],
+      ['Vendas PDV', fmt(t.fatPDV), 'var(--green)'],
     ['Entradas manuais', fmt(t.fatVendas), 'var(--green)'],
     ['Receitas externas', fmt(t.fatPlat), 'var(--green)'],
     ['Reinvest. usado', '- ' + fmt(t.totalReinvestUsado), 'var(--yellow)'],
