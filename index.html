@@ -607,11 +607,16 @@ function renderDashboard() {
   var pctHoje = Math.min((fh / 365) * 100, 100);
   var baixo = produtosEstoqueBaixo();
   var diaAtual = parseInt(hoje().split('-')[2]);
-  var proximas = getDespesas().filter(function(d) { return d.dia >= diaAtual && d.dia <= diaAtual + 5 && !pagamentos[d.dia + '-' + d.desc]; }).slice(0, 3);
+  // Despesas atrasadas (dia < hoje, não pagas)
+  var atrasadas = getDespesas().filter(function(d) { return d.dia > 0 && d.dia < diaAtual && !pagamentos[d.dia + '-' + d.desc]; });
+  // Próximas despesas (dia >= hoje, não pagas, próximos 5 dias)
+  var proximas5 = getDespesas().filter(function(d) { return d.dia >= diaAtual && d.dia <= diaAtual + 5 && !pagamentos[d.dia + '-' + d.desc]; });
+  // Combinar: atrasadas primeiro, depois próximas, máximo 6
+  var proximas = atrasadas.concat(proximas5).slice(0, 6);
   var alertas = '';
   if (t.saldoConta < 500) alertas += '<div class="alert alert-red">Saldo em conta abaixo de R$ 500.</div>';
   if (baixo.length > 0) alertas += '<div class="alert alert-orange">' + baixo.length + ' produto(s) com estoque baixo.</div>';
-  var proxD = getDespesas().filter(function(d) { return d.dia >= diaAtual && d.dia <= diaAtual + 3 && !pagamentos[d.dia + '-' + d.desc]; });
+  var proxD = getDespesas().filter(function(d) { return d.dia > 0 && d.dia <= diaAtual + 3 && !pagamentos[d.dia + '-' + d.desc]; });
   if (proxD.length > 0) alertas += '<div class="alert alert-yellow">' + proxD.length + ' despesa(s) vencem em ate 3 dias - ' + fmt(proxD.reduce(function(a, d) { return a + d.val; }, 0)) + '</div>';
   if (t.totalFat >= t.metaMes) alertas += '<div class="alert alert-green">Meta do mes atingida!</div>';
   var resumoRows = [
@@ -627,7 +632,10 @@ function renderDashboard() {
     return '<div style="display:flex;justify-content:space-between;font-size:11px;padding:5px 0;' + (i > 0 ? 'border-top:1px solid var(--border)' : '') + (i >= 6 ? ';font-weight:600' : '') + '"><span style="color:var(--text3);">' + r[0] + '</span><span style="color:' + r[2] + ';">' + r[1] + '</span></div>';
   }).join('');
   var proximasHtml = proximas.map(function(d) {
-    return '<div class="li"><div class="li-info"><div class="li-title">' + d.desc + '</div><div class="li-sub">Dia ' + d.dia + '</div></div><div style="text-align:right;"><div class="li-val" style="color:var(--red);">' + fmt(d.val) + '</div><button class="btn btn-sm btn-green-sm" style="margin-top:4px;" onclick="data-dia="' + d.dia + '" data-desc="' + d.desc + '" onclick="togglePagoBtn(this)">Pagar</button></div></div>';
+    var atrasada = d.dia > 0 && d.dia < diaAtual;
+    var labelDia = atrasada ? 'Dia ' + d.dia + ' - ATRASADA' : 'Dia ' + d.dia;
+    var corSub = atrasada ? 'color:var(--red);font-weight:600;' : '';
+    return '<div class="li"><div class="li-info"><div class="li-title">' + d.desc + '</div><div class="li-sub" style="' + corSub + '">' + labelDia + '</div></div><div style="text-align:right;"><div class="li-val" style="color:var(--red);">' + fmt(d.val) + '</div><button class="btn btn-sm btn-green-sm" style="margin-top:4px;" data-dia="' + d.dia + '" data-desc="' + d.desc + '" onclick="togglePagoBtn(this)">Pagar</button></div></div>';
   }).join('');
   document.getElementById('page-dashboard').innerHTML =
     '<div class="card-grid">' +
