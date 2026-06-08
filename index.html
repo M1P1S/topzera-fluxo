@@ -484,7 +484,11 @@ function getDespesas() {
   var ov = {};
   despesasExtra.forEach(function(d) { if (d._override && d._origDesc) ov[d._origDesc] = d; });
   var base = DESPESAS_PADRAO.map(function(d) { return ov[d.desc] ? Object.assign({}, ov[d.desc]) : d; });
-  return base.concat(despesasExtra.filter(function(d) { return !d._override; }));
+  var todas = base.concat(despesasExtra.filter(function(d) { return !d._override; }));
+  return todas.sort(function(a, b) {
+    if (a.sem !== b.sem) return a.sem - b.sem;
+    return (a.dia || 0) - (b.dia || 0);
+  });
 }
 
 function fmt(v) { return 'R$ ' + Math.abs(+v || 0).toLocaleString('pt-BR', {minimumFractionDigits:2}); }
@@ -623,7 +627,7 @@ function renderDashboard() {
     return '<div style="display:flex;justify-content:space-between;font-size:11px;padding:5px 0;' + (i > 0 ? 'border-top:1px solid var(--border)' : '') + (i >= 6 ? ';font-weight:600' : '') + '"><span style="color:var(--text3);">' + r[0] + '</span><span style="color:' + r[2] + ';">' + r[1] + '</span></div>';
   }).join('');
   var proximasHtml = proximas.map(function(d) {
-    return '<div class="li"><div class="li-info"><div class="li-title">' + d.desc + '</div><div class="li-sub">Dia ' + d.dia + '</div></div><div style="text-align:right;"><div class="li-val" style="color:var(--red);">' + fmt(d.val) + '</div><button class="btn btn-sm btn-green-sm" style="margin-top:4px;" onclick="togglePago(' + d.dia + ',&quot;' + d.desc + '&quot;)">Pagar</button></div></div>';
+    return '<div class="li"><div class="li-info"><div class="li-title">' + d.desc + '</div><div class="li-sub">Dia ' + d.dia + '</div></div><div style="text-align:right;"><div class="li-val" style="color:var(--red);">' + fmt(d.val) + '</div><button class="btn btn-sm btn-green-sm" style="margin-top:4px;" onclick="data-dia="' + d.dia + '" data-desc="' + d.desc + '" onclick="togglePagoBtn(this)">Pagar</button></div></div>';
   }).join('');
   document.getElementById('page-dashboard').innerHTML =
     '<div class="card-grid">' +
@@ -778,8 +782,8 @@ function renderLancar() {
       '<div style="text-align:right;">' +
         '<div class="li-val" style="color:var(--green);">' + fmt(fat) + '</div>' +
         '<div style="display:flex;gap:5px;margin-top:4px;justify-content:flex-end;">' +
-          '<button class="btn btn-sm btn-yellow-sm" onclick="abrirEditLanc(' + JSON.stringify(l.id) + ')">editar</button>' +
-          '<button class="btn btn-sm btn-danger-sm" onclick="deletarLanc(' + JSON.stringify(l.id) + ')">excluir</button>' +
+          '<button class="btn btn-sm btn-yellow-sm" onclick="abrirEditLanc(&quot;' + l.id + '&quot;)">editar</button>' +
+          '<button class="btn btn-sm btn-danger-sm" onclick="deletarLanc(&quot;' + l.id + '&quot;)">excluir</button>' +
         '</div>' +
       '</div>' +
     '</div>';
@@ -789,7 +793,7 @@ function renderLancar() {
     return '<div class="li">' +
       '<div class="li-info"><div class="li-title">' + s.descricao + '</div><div class="li-sub">' + s.data + ' - <span class="badge bg-purple">' + s.categoria + '</span></div></div>' +
       '<div style="text-align:right;"><div class="li-val" style="color:var(--red);">- ' + fmt(+s.valor) + '</div>' +
-        '<button class="btn btn-sm btn-danger-sm" style="margin-top:4px;" onclick="deletarSaida(' + JSON.stringify(s.id) + ')">excluir</button>' +
+        '<button class="btn btn-sm btn-danger-sm" style="margin-top:4px;" onclick="deletarSaida(&quot;' + s.id + '&quot;)">excluir</button>' +
       '</div>' +
     '</div>';
   }).join('');
@@ -1076,6 +1080,12 @@ async function deletarSaida(id) {
   saidas = saidas.filter(function(s) { return s.id !== id; });
   renderAll();
   try { await sb('saidas?id=eq.' + id, {method:'DELETE'}); } catch(e) {}
+}
+
+function togglePagoBtn(btn) {
+  var dia = parseInt(btn.dataset.dia);
+  var desc = btn.dataset.desc;
+  togglePago(dia, desc);
 }
 
 async function togglePago(dia, desc) {
