@@ -583,7 +583,7 @@ function calcTotais() {
   var totalFat = fatVendas + fatPDV + fatPlat;
   var totalReinvest = Math.round((fatVendas + fatPDV) * REINVEST * 100) / 100;
   var totalReinvestUsado = reinvestimentos.reduce(function(a, r) { return a + (+r.valor || 0); }, 0);
-  var totalLiquido = (fatVendas + fatPDV) - totalReinvest;
+  var totalLiquido = (fatVendas + fatPDV) - totalReinvestUsado;
   var totalDespPagas = getDespesas().filter(function(d) { return pagamentos[d.dia + '-' + d.desc]; }).reduce(function(a, d) { return a + d.val; }, 0);
   var totalSaidas = saidas.reduce(function(a, s) { return a + (+s.valor || 0); }, 0);
   var saldoConta = saldoInicial.valor + totalLiquido + fatPlat - totalDespPagas - totalSaidas;
@@ -648,7 +648,8 @@ function renderDashboard() {
     ['Vendas PDV', fmt(t.fatPDV), 'var(--green)'],
     ['Entradas manuais', fmt(t.fatVendas), 'var(--green)'],
     ['Receitas externas', fmt(t.fatPlat), 'var(--green)'],
-    ['Reinvestimento', '- ' + fmt(t.totalReinvest), 'var(--yellow)'],
+    ['Reinvest. usado', '- ' + fmt(t.totalReinvestUsado), 'var(--yellow)'],
+    ['Reinvest. total (35%)', fmt(t.totalReinvest), 'var(--yellow)'],
     ['Desp. pagas', '- ' + fmt(t.totalDespPagas), 'var(--red)'],
     ['Saidas', '- ' + fmt(t.totalSaidas), 'var(--red)'],
     ['Saldo conta', fmtS(t.saldoConta), t.saldoConta >= 0 ? 'var(--green)' : 'var(--red)']
@@ -936,7 +937,8 @@ function renderConfig() {
   }).join('');
   var catHtml = categorias.length === 0 ? '<div class="empty" style="margin-bottom:10px;">Nenhuma categoria.</div>' : categorias.map(function(c) { return '<div class="li" style="margin-bottom:6px;"><div class="li-info"><div class="li-title">' + c.nome + '</div></div><button class="btn btn-sm btn-danger-sm" onclick="excluirCategoria(&quot;' + c.id + '&quot;)">excluir</button></div>'; }).join('');
   var fornHtml = fornecedores.length === 0 ? '<div class="empty" style="margin-bottom:10px;">Nenhum fornecedor.</div>' : fornecedores.map(function(f) { return '<div class="li" style="margin-bottom:6px;"><div class="li-info"><div class="li-title">' + f.nome + '</div><div class="li-sub">' + (f.telefone || '') + '</div></div><button class="btn btn-sm btn-danger-sm" onclick="excluirFornecedor(&quot;' + f.id + '&quot;)">excluir</button></div>'; }).join('');
-  var resumoRows = [['Vendas PDV', fmt(t.fatPDV), 'var(--green)'], ['Entradas manuais', fmt(t.fatVendas), 'var(--green)'], ['Receitas externas', fmt(t.fatPlat), 'var(--green)'], ['Reinvestimento 35%', '- ' + fmt(t.totalReinvest), 'var(--yellow)'], ['Saidas', '- ' + fmt(t.totalSaidas), 'var(--red)'], ['Desp. pagas', '- ' + fmt(t.totalDespPagas), 'var(--red)'], ['Resultado', fmtS(t.saldoConta - saldoInicial.valor), t.saldoConta >= saldoInicial.valor ? 'var(--green)' : 'var(--red)']];
+  var resumoRows = [['Vendas PDV', fmt(t.fatPDV), 'var(--green)'], ['Entradas manuais', fmt(t.fatVendas), 'var(--green)'], ['Receitas externas', fmt(t.fatPlat), 'var(--green)'], ['Reinvest. usado', '- ' + fmt(t.totalReinvestUsado), 'var(--yellow)'],
+      ['Reinvest. disponivel (35%)', fmt(t.totalReinvest), 'var(--yellow)'], ['Saidas', '- ' + fmt(t.totalSaidas), 'var(--red)'], ['Desp. pagas', '- ' + fmt(t.totalDespPagas), 'var(--red)'], ['Resultado', fmtS(t.saldoConta - saldoInicial.valor), t.saldoConta >= saldoInicial.valor ? 'var(--green)' : 'var(--red)']];
   document.getElementById('page-config').innerHTML =
     '<div class="sec">Conta <button class="btn btn-sm btn-yellow-sm" onclick="abrirConfigModal(&quot;perfil&quot;)">editar</button></div>' +
     '<div class="li" style="margin-bottom:12px;"><div class="li-info"><div class="li-title">' + (perfil.nome_comercio || 'Meu Comercio') + '</div><div class="li-sub">' + (perfil.nome_dono || '') + ' - Meta: ' + fmt(perfil.meta_mensal || 9500) + '/mes</div></div></div>' +
