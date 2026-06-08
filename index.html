@@ -773,11 +773,14 @@ function renderLancar() {
     var reinv = Math.round(fat * REINVEST * 100) / 100;
     var d = new Date(l.data + 'T12:00:00');
     var label = d.toLocaleDateString('pt-BR', {weekday:'short', day:'2-digit', month:'2-digit'});
+    var vPDV = vendas.filter(function(v) { return v.data === l.data; }).reduce(function(a,v) { return a+(+v.total_final||0); }, 0);
+    var fatTotal = fat + vPDV;
     return '<div class="li">' +
       '<div class="li-info">' +
         '<div class="li-title">' + label + '</div>' +
-        '<div class="li-sub">' + fmt(+l.dinheiro||0) + ' | ' + fmt(+l.pix||0) + ' | ' + fmt(+l.debito||0) + ' | ' + fmt(+l.credito||0) + '</div>' +
-        '<div class="li-sub" style="color:var(--yellow);">Reinvest: ' + fmt(reinv) + '</div>' +
+        '<div class="li-sub">Dinheiro: ' + fmt(+l.dinheiro||0) + ' | Pix: ' + fmt(+l.pix||0) + ' | Deb: ' + fmt(+l.debito||0) + ' | Cred: ' + fmt(+l.credito||0) + '</div>' +
+        (vPDV > 0 ? '<div class="li-sub" style="color:var(--blue);">+ PDV: ' + fmt(vPDV) + ' | Total dia: ' + fmt(fatTotal) + '</div>' : '') +
+        '<div class="li-sub" style="color:var(--yellow);">Reinvest: ' + fmt(Math.round(fatTotal * REINVEST * 100) / 100) + '</div>' +
       '</div>' +
       '<div style="text-align:right;">' +
         '<div class="li-val" style="color:var(--green);">' + fmt(fat) + '</div>' +
@@ -1083,16 +1086,18 @@ async function deletarSaida(id) {
 }
 
 function togglePagoBtn(btn) {
-  var dia = parseInt(btn.dataset.dia);
-  var desc = btn.dataset.desc;
+  var dia = parseInt(btn.getAttribute('data-dia'));
+  var desc = btn.getAttribute('data-desc');
+  if (!desc) { desc = btn.dataset.desc || ''; }
   togglePago(dia, desc);
 }
 
 async function togglePago(dia, desc) {
-  var key = dia + '-' + desc;
+  if (!dia || !desc) return;
+  var key = String(dia) + '-' + String(desc);
   var nv = !pagamentos[key];
   pagamentos[key] = nv;
-  try { await sb('pagamentos', {method:'POST', headers:{'Prefer':'resolution=merge-duplicates,return=representation'}, body:JSON.stringify({dia:dia, descricao:desc, mes_ano:MES_ANO, pago:nv, pago_em:nv ? new Date().toISOString() : null, user_id:userId})}); } catch(e) {}
+  try { await sb('pagamentos', {method:'POST', headers:{'Prefer':'resolution=merge-duplicates,return=representation'}, body:JSON.stringify({dia:parseInt(dia), descricao:String(desc), mes_ano:MES_ANO, pago:nv, pago_em:nv ? new Date().toISOString() : null, user_id:userId})}); } catch(e) { console.error('togglePago erro:', e); }
   renderAll();
 }
 
