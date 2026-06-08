@@ -1185,7 +1185,13 @@ async function salvarSaldoInicial() {
   var obs = document.getElementById('siO').value.trim();
   var novo = {valor:valor, data:data, obs:obs};
   try {
-    await sb('configuracoes', {method:'POST', headers:{'Prefer':'resolution=merge-duplicates,return=representation'}, body:JSON.stringify({chave:'saldo_inicial', valor:JSON.stringify(novo), descricao:'Saldo inicial', user_id:userId})});
+    // Tentar UPDATE primeiro, se não existir faz INSERT
+    var existe = await sb('configuracoes?chave=eq.saldo_inicial&user_id=eq.' + userId);
+    if (existe && existe.length > 0) {
+      await sb('configuracoes?chave=eq.saldo_inicial&user_id=eq.' + userId, {method:'PATCH', body:JSON.stringify({valor:JSON.stringify(novo)})});
+    } else {
+      await sb('configuracoes', {method:'POST', body:JSON.stringify({chave:'saldo_inicial', valor:JSON.stringify(novo), descricao:'Saldo inicial', user_id:userId})});
+    }
     saldoInicial = novo;
     showMsg('siMsg', 'Salvo!', 'ok');
     setTimeout(function() { fecharMo('moConfig'); renderAll(); }, 700);
