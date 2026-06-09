@@ -417,8 +417,14 @@ async function carregarPerfil() {
 
 async function logout() {
   if (!confirm('Sair do sistema?')) return;
+  // Limpar todos os dados locais ao sair
   token = null; userId = null; perfil = {};
-  localStorage.removeItem('fc_token'); localStorage.removeItem('fc_user');
+  lancamentos = []; pagamentos = {}; receitas = []; saidas = []; vendas = [];
+  produtos = []; categorias = []; fornecedores = []; reinvestimentos = []; despesasFixas = [];
+  saldoInicial = {valor:0, data:hoje(), obs:''};
+  caixaFixoAtual = {valor:0, data:hoje()};
+  localStorage.removeItem('fc_token');
+  localStorage.removeItem('fc_user');
   document.getElementById('app').classList.remove('visible');
   document.getElementById('authScreen').style.display = 'flex';
 }
@@ -534,6 +540,11 @@ function showMsg(id, txt, cor) {
 
 async function carregarDados() {
   setSyncBadge('load');
+  // Resetar todos os dados antes de carregar do banco
+  lancamentos = []; pagamentos = {}; receitas = []; saidas = []; vendas = [];
+  produtos = []; categorias = []; fornecedores = []; reinvestimentos = []; despesasFixas = [];
+  saldoInicial = {valor:0, data:hoje(), obs:''};
+  caixaFixoAtual = {valor:0, data:hoje()};
   despesasExtra = JSON.parse(localStorage.getItem('fc_desp_' + userId) || '[]');
   try {
     var uid = userId;
