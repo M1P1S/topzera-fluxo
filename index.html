@@ -1014,8 +1014,10 @@ function buildCharts() {
   evs.sort(function(a,b) { return a.data.localeCompare(b.data); });
   evs.forEach(function(e) { se+=e.d; sl.push('D'+diaNum(e.data)); sd.push(Math.round(se*100)/100); });
   charts.saldo = new Chart(document.getElementById('cSaldo'), {type:'line', data:{labels:sl, datasets:[{data:sd, borderColor:'#60a5fa', backgroundColor:'rgba(96,165,250,0.06)', fill:true, tension:0.3, pointRadius:2, pointBackgroundColor:sd.map(function(v) { return v>=0?'#60a5fa':'#f87171'; })}, {data:Array(sl.length).fill(0), borderColor:'rgba(248,113,113,0.3)', borderDash:[4,3], pointRadius:0, fill:false}]}, options:Object.assign({}, co, {plugins:{legend:{display:false}, tooltip:{callbacks:{label:function(ctx) { return fmtS(ctx.raw); }}}}})}); 
-  var fa = [10987.63, 8562.44, 13376.23, 8450.11, 10677.38, calcTotais().totalFat, 0, 0, 0, 0, 0, 0];
+  // Faturamento anual: apenas o mes atual vem do banco, historico zerado para novos usuarios
   var mi = new Date().getMonth();
+  var fa = Array(12).fill(0);
+  fa[mi] = calcTotais().totalFat;
   charts.anual = new Chart(document.getElementById('cAnual'), {type:'bar', data:{labels:['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'], datasets:[{data:fa, backgroundColor:fa.map(function(v,i) { return i===mi?'rgba(74,222,128,0.8)':i<mi?'rgba(96,165,250,0.5)':'rgba(255,255,255,0.06)'; }), borderRadius:4}, {label:'Meta', data:Array(12).fill(perfil.meta_mensal||9500), type:'line', borderColor:'rgba(251,191,36,0.5)', borderDash:[5,4], borderWidth:1.5, pointRadius:0, fill:false}]}, options:Object.assign({}, co, {plugins:{legend:{display:false}, tooltip:{callbacks:{label:function(ctx) { return fmt(ctx.raw); }}}}})});
 }
 
