@@ -423,6 +423,7 @@ async function logout() {
   produtos = []; categorias = []; fornecedores = []; reinvestimentos = []; despesasFixas = [];
   saldoInicial = {valor:0, data:hoje(), obs:''};
   caixaFixoAtual = {valor:0, data:hoje()};
+  faturamentoHistorico = [];
   localStorage.removeItem('fc_token');
   localStorage.removeItem('fc_user');
   document.getElementById('app').classList.remove('visible');
@@ -465,7 +466,7 @@ function getMesAno() {
 const MES_ANO = getMesAno();
 const REINVEST = 0.35;
 
-let lancamentos = [], pagamentos = {}, receitas = [], saidas = [], vendas = [], produtos = [], categorias = [], fornecedores = [], reinvestimentos = [], despesasFixas = [];
+let lancamentos = [], pagamentos = {}, receitas = [], saidas = [], vendas = [], produtos = [], categorias = [], fornecedores = [], reinvestimentos = [], despesasFixas = [], faturamentoHistorico = [];
 let saldoInicial = {valor:0, data:new Date().toISOString().split('T')[0], obs:''};
 let caixaFixoAtual = {valor:0, data:new Date().toISOString().split('T')[0]};
 let despesasExtra = [];
@@ -545,6 +546,7 @@ async function carregarDados() {
   produtos = []; categorias = []; fornecedores = []; reinvestimentos = []; despesasFixas = [];
   saldoInicial = {valor:0, data:hoje(), obs:''};
   caixaFixoAtual = {valor:0, data:hoje()};
+  faturamentoHistorico = [];
   despesasExtra = JSON.parse(localStorage.getItem('fc_desp_' + userId) || '[]');
   try {
     var uid = userId;
@@ -559,6 +561,7 @@ async function carregarDados() {
       sb('fornecedores?user_id=eq.' + uid + '&order=nome.asc').catch(function() { return []; }),
       sb('reinvestimentos?user_id=eq.' + uid + '&mes_ano=eq.' + MES_ANO + '&order=data.asc').catch(function() { return []; }),
       sb('despesas_fixas?user_id=eq.' + uid + '&ativo=eq.true&order=sem.asc,dia.asc').catch(function() { return []; }),
+      sb('faturamento_historico?user_id=eq.' + uid + '&order=mes_ano.asc').catch(function() { return []; }),
       sb('configuracoes?user_id=eq.' + uid).catch(function() { return []; }),
       sb('caixa_fixo?user_id=eq.' + uid + '&order=data.desc&limit=1').catch(function() { return []; })
     ]);
@@ -573,8 +576,9 @@ async function carregarDados() {
     fornecedores = Array.isArray(results[7]) ? results[7] : [];
     reinvestimentos = Array.isArray(results[8]) ? results[8] : [];
     despesasFixas = Array.isArray(results[9]) ? results[9].map(function(d) { return {id:d.id, desc:d.descricao, val:+d.valor, dia:d.dia, sem:d.sem, cat:d.cat}; }) : [];
-    var configs = Array.isArray(results[10]) ? results[10] : [];
-    var cf = Array.isArray(results[11]) ? results[11] : [];
+    faturamentoHistorico = Array.isArray(results[10]) ? results[10] : [];
+    var configs = Array.isArray(results[11]) ? results[11] : [];
+    var cf = Array.isArray(results[12]) ? results[12] : [];
     var si = configs.find(function(c) { return c.chave === 'saldo_inicial'; });
     if (si) {
       try { var d = JSON.parse(si.valor); saldoInicial = {valor:+d.valor || 0, data:d.data || hoje(), obs:d.obs || ''}; }
@@ -1018,10 +1022,14 @@ function buildCharts() {
   evs.sort(function(a,b) { return a.data.localeCompare(b.data); });
   evs.forEach(function(e) { se+=e.d; sl.push('D'+diaNum(e.data)); sd.push(Math.round(se*100)/100); });
   charts.saldo = new Chart(document.getElementById('cSaldo'), {type:'line', data:{labels:sl, datasets:[{data:sd, borderColor:'#60a5fa', backgroundColor:'rgba(96,165,250,0.06)', fill:true, tension:0.3, pointRadius:2, pointBackgroundColor:sd.map(function(v) { return v>=0?'#60a5fa':'#f87171'; })}, {data:Array(sl.length).fill(0), borderColor:'rgba(248,113,113,0.3)', borderDash:[4,3], pointRadius:0, fill:false}]}, options:Object.assign({}, co, {plugins:{legend:{display:false}, tooltip:{callbacks:{label:function(ctx) { return fmtS(ctx.raw); }}}}})}); 
-  // Faturamento anual: apenas o mes atual vem do banco, historico zerado para novos usuarios
+  // Faturamento anual: historico do banco + mes atual calculado
   var mi = new Date().getMonth();
   var fa = Array(12).fill(0);
-  fa[mi] = calcTotais().totalFat;
+  faturamentoHistorico.forEach(function(h) {
+    var mes = parseInt(h.mes_ano.split('-')[1]) - 1; // 0-indexed
+    fa[mes] = +h.total || 0;
+  });
+  fa[mi] = calcTotais().totalFat; // mes atual sempre do banco
   charts.anual = new Chart(document.getElementById('cAnual'), {type:'bar', data:{labels:['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'], datasets:[{data:fa, backgroundColor:fa.map(function(v,i) { return i===mi?'rgba(74,222,128,0.8)':i<mi?'rgba(96,165,250,0.5)':'rgba(255,255,255,0.06)'; }), borderRadius:4}, {label:'Meta', data:Array(12).fill(perfil.meta_mensal||9500), type:'line', borderColor:'rgba(251,191,36,0.5)', borderDash:[5,4], borderWidth:1.5, pointRadius:0, fill:false}]}, options:Object.assign({}, co, {plugins:{legend:{display:false}, tooltip:{callbacks:{label:function(ctx) { return fmt(ctx.raw); }}}}})});
 }
 
