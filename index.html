@@ -728,8 +728,6 @@ function renderDashboard() {
     ['Saldo inicial (' + saldoInicial.data + ')', fmt(saldoInicial.valor), 'var(--text2)'],
       ['Vendas PDV', fmt(t.fatPDV), 'var(--green)'],
     ['Entradas manuais', fmt(t.fatVendas), 'var(--green)'],
-    ['  ↳ Dinheiro', fmt(t.fatDinheiro + t.fatPDVDinheiro), 'var(--green)'],
-    ['  ↳ Conta (Pix/Deb/Cred)', fmt(t.fatConta + t.fatPDVConta), 'var(--green)'],
     ['Receitas externas', fmt(t.fatPlat), 'var(--green)'],
     ['Reinvest. usado', '- ' + fmt(t.totalReinvestUsado), 'var(--yellow)'],
     ['Reinvest. total (35%)', fmt(t.totalReinvest), 'var(--yellow)'],
@@ -753,9 +751,6 @@ function renderDashboard() {
     '<div class="card yellow"><div class="cl">Reinvestir</div><div class="cv">' + fmt(t.totalReinvest) + '</div><div class="cs">Usado: ' + fmt(t.totalReinvestUsado) + ' | Saldo: ' + fmt(Math.max(0, t.totalReinvest - t.totalReinvestUsado)) + '</div></div>' +
     '<div class="card purple"><div class="cl">Caixa fixo</div><div class="cv">' + fmt(caixaFixoAtual.valor) + '</div><div class="cs"><button class="btn btn-sm btn-blue-sm" onclick="abrirConfigModal(&quot;caixaFixo&quot;)">Atualizar</button></div></div>' +
     '</div>' +
-    '<div class="card-grid" style="margin-bottom:12px;">' +
-    '<div class="card green"><div class="cl">💵 Dinheiro</div><div class="cv">' + fmt(t.totalDinheiro) + '</div><div class="cs">em especie no mes</div></div>' +
-    '<div class="card blue"><div class="cl">🏦 Conta digital</div><div class="cv">' + fmt(t.totalConta) + '</div><div class="cs">Pix + Debito + Credito</div></div>' +
     '</div>' +
     alertas +
     '<div class="sec">Meta de hoje</div>' +
