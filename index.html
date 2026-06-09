@@ -459,7 +459,7 @@ function getMesAno() {
 const MES_ANO = getMesAno();
 const REINVEST = 0.35;
 
-let lancamentos = [], pagamentos = {}, receitas = [], saidas = [], vendas = [], produtos = [], categorias = [], fornecedores = [], reinvestimentos = [];
+let lancamentos = [], pagamentos = {}, receitas = [], saidas = [], vendas = [], produtos = [], categorias = [], fornecedores = [], reinvestimentos = [], despesasFixas = [];
 let saldoInicial = {valor:0, data:new Date().toISOString().split('T')[0], obs:''};
 let caixaFixoAtual = {valor:0, data:new Date().toISOString().split('T')[0]};
 let despesasExtra = [];
@@ -502,14 +502,11 @@ const SEMANAS = [
   {num:4, label:'Semana 4', periodo:'22 a 30', dias:[22,23,24,25,26,27,28,29,30]}
 ];
 
-function getDespesas(incluirDesativadas) {
-  var ov = {};
-  despesasExtra.forEach(function(d) { if (d._override && d._origDesc) ov[d._origDesc] = d; });
-  var base = DESPESAS_PADRAO.map(function(d) { return ov[d.desc] ? Object.assign({}, ov[d.desc]) : d; });
-  var todas = base.concat(despesasExtra.filter(function(d) { return !d._override; }));
-  if (!incluirDesativadas) {
-    todas = todas.filter(function(d) { return !d._desativada; });
-  }
+function getDespesas() {
+  // Usar despesas do banco (por usuario) + extras locais nao-override
+  var extras = despesasExtra.filter(function(d) { return !d._override && !d._desativada; });
+  var banco = despesasFixas.filter(function(d) { return !d._desativada; });
+  var todas = banco.concat(extras);
   return todas.sort(function(a, b) {
     if (a.sem !== b.sem) return a.sem - b.sem;
     return (a.dia || 0) - (b.dia || 0);
@@ -550,6 +547,7 @@ async function carregarDados() {
       sb('categorias?user_id=eq.' + uid + '&order=nome.asc').catch(function() { return []; }),
       sb('fornecedores?user_id=eq.' + uid + '&order=nome.asc').catch(function() { return []; }),
       sb('reinvestimentos?user_id=eq.' + uid + '&mes_ano=eq.' + MES_ANO + '&order=data.asc').catch(function() { return []; }),
+      sb('despesas_fixas?user_id=eq.' + uid + '&ativo=eq.true&order=sem.asc,dia.asc').catch(function() { return []; }),
       sb('configuracoes?user_id=eq.' + uid).catch(function() { return []; }),
       sb('caixa_fixo?user_id=eq.' + uid + '&order=data.desc&limit=1').catch(function() { return []; })
     ]);
@@ -563,8 +561,9 @@ async function carregarDados() {
     categorias = Array.isArray(results[6]) ? results[6] : [];
     fornecedores = Array.isArray(results[7]) ? results[7] : [];
     reinvestimentos = Array.isArray(results[8]) ? results[8] : [];
-    var configs = Array.isArray(results[9]) ? results[9] : [];
-    var cf = Array.isArray(results[10]) ? results[10] : [];
+    despesasFixas = Array.isArray(results[9]) ? results[9].map(function(d) { return {id:d.id, desc:d.descricao, val:+d.valor, dia:d.dia, sem:d.sem, cat:d.cat}; }) : [];
+    var configs = Array.isArray(results[10]) ? results[10] : [];
+    var cf = Array.isArray(results[11]) ? results[11] : [];
     var si = configs.find(function(c) { return c.chave === 'saldo_inicial'; });
     if (si) {
       try { var d = JSON.parse(si.valor); saldoInicial = {valor:+d.valor || 0, data:d.data || hoje(), obs:d.obs || ''}; }
@@ -1428,53 +1427,42 @@ async function excluirFornecedor(id) {
   renderAll();
 }
 
-function excluirDesp(idx, desc) {
-  if (!confirm('Excluir "' + desc + '"?\nEla nao aparecera mais nas despesas e semanas.')) return;
-  despesasExtra = JSON.parse(localStorage.getItem('fc_desp_' + userId) || '[]');
-  if (idx < DESPESAS_PADRAO.length) {
-    // Despesa padrao: salvar como desativada via override
-    var origDesc = DESPESAS_PADRAO[idx].desc;
-    var ei = despesasExtra.findIndex(function(x) { return x._override && x._origDesc === origDesc; });
-    var novo = Object.assign({}, DESPESAS_PADRAO[idx], {_override:true, _origDesc:origDesc, _desativada:true});
-    if (ei >= 0) despesasExtra[ei] = novo; else despesasExtra.push(novo);
-    DESPESAS_PADRAO[idx]._desativada = true;
-  } else {
-    // Despesa customizada: remover do array
-    var customs = despesasExtra.filter(function(d) { return !d._override; });
-    var item = customs[idx - DESPESAS_PADRAO.length];
-    if (item) {
-      var ri = despesasExtra.indexOf(item);
-      if (ri >= 0) despesasExtra.splice(ri, 1);
-    }
+async function excluirDesp(idx, descNome) {
+  if (!confirm('Excluir "' + descNome + '"?')) return;
+  var d = getDespesas()[idx];
+  if (d && d.id) {
+    try {
+      await sb('despesas_fixas?id=eq.' + d.id, {method:'PATCH', body:JSON.stringify({ativo:false})});
+      despesasFixas = despesasFixas.filter(function(x) { return x.id !== d.id; });
+      renderAll();
+    } catch(e) { alert('Erro ao excluir: ' + e.message); }
   }
-  localStorage.setItem('fc_desp_' + userId, JSON.stringify(despesasExtra));
-  renderAll();
 }
 
-function salvarDesp(idx) {
-  var desc = document.getElementById('dDesc').value.trim();
-  var val = parseFloat(document.getElementById('dVal').value) || 0;
+async function salvarDesp(idx) {
+  var descricao = document.getElementById('dDesc').value.trim();
+  var valor = parseFloat(document.getElementById('dVal').value) || 0;
   var dia = parseInt(document.getElementById('dDia').value) || 0;
   var sem = parseInt(document.getElementById('dSem').value) || 1;
   var cat = document.getElementById('dCat').value;
-  if (!desc || val <= 0) { showMsg('dMsg', 'Preencha descricao e valor.', 'err'); return; }
-  despesasExtra = JSON.parse(localStorage.getItem('fc_desp_' + userId) || '[]');
-  if (idx !== null && idx !== undefined && idx < DESPESAS_PADRAO.length) {
-    var origDesc = DESPESAS_PADRAO[idx].desc;
-    var ei = despesasExtra.findIndex(function(x) { return x._override && x._origDesc === origDesc; });
-    var novo = {desc:desc, val:val, dia:dia, sem:sem, cat:cat, _override:true, _origDesc:origDesc, editavel:true};
-    if (ei >= 0) despesasExtra[ei] = novo; else despesasExtra.push(novo);
-    DESPESAS_PADRAO[idx] = Object.assign({}, DESPESAS_PADRAO[idx], {desc:desc, val:val, dia:dia, sem:sem, cat:cat});
-  } else if (idx !== null && idx !== undefined) {
-    var customs = despesasExtra.filter(function(d) { return !d._override; });
-    var ei2 = despesasExtra.indexOf(customs[idx - DESPESAS_PADRAO.length]);
-    if (ei2 >= 0) despesasExtra[ei2] = Object.assign({}, despesasExtra[ei2], {desc:desc, val:val, dia:dia, sem:sem, cat:cat});
-  } else {
-    despesasExtra.push({desc:desc, val:val, dia:dia, sem:sem, cat:cat, editavel:true, _custom:true});
-  }
-  localStorage.setItem('fc_desp_' + userId, JSON.stringify(despesasExtra));
-  showMsg('dMsg', 'Salvo!', 'ok');
-  setTimeout(function() { fecharMo('moConfig'); renderAll(); }, 700);
+  if (!descricao || valor <= 0) { showMsg('dMsg', 'Preencha descricao e valor.', 'err'); return; }
+  showMsg('dMsg', 'Salvando...', 'warn');
+  try {
+    if (idx !== null && idx !== undefined) {
+      // Editar despesa existente no banco
+      var d = getDespesas()[idx];
+      if (d && d.id) {
+        await sb('despesas_fixas?id=eq.' + d.id, {method:'PATCH', body:JSON.stringify({descricao:descricao, valor:valor, dia:dia, sem:sem, cat:cat})});
+        despesasFixas = despesasFixas.map(function(x) { return x.id === d.id ? Object.assign({}, x, {desc:descricao, val:valor, dia:dia, sem:sem, cat:cat}) : x; });
+      }
+    } else {
+      // Nova despesa
+      var res = await sb('despesas_fixas', {method:'POST', headers:{'Prefer':'return=representation'}, body:JSON.stringify({user_id:userId, descricao:descricao, valor:valor, dia:dia, sem:sem, cat:cat})});
+      if (Array.isArray(res) && res[0]) despesasFixas.push({id:res[0].id, desc:descricao, val:valor, dia:dia, sem:sem, cat:cat});
+    }
+    showMsg('dMsg', 'Salvo!', 'ok');
+    setTimeout(function() { fecharMo('moConfig'); renderAll(); }, 700);
+  } catch(e) { showMsg('dMsg', 'Erro: ' + e.message, 'err'); }
 }
 
 function fecharMo(id) { document.getElementById(id).classList.remove('open'); }
