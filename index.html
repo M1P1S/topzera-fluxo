@@ -952,6 +952,10 @@ function renderLancar() {
     '<div class="field"><label>Pix</label><input type="number" id="lancPix" placeholder="0.00" step="0.01" inputmode="decimal"></div>' +
     '<div class="field"><label>Debito</label><input type="number" id="lancDeb" placeholder="0.00" step="0.01" inputmode="decimal"></div>' +
     '<div class="field"><label>Credito</label><input type="number" id="lancCred" placeholder="0.00" step="0.01" inputmode="decimal"></div>' +
+    '<div class="field-row">' +
+      '<div class="field"><label>Outros (descricao)</label><input type="text" id="lancOutrosDesc" placeholder="Ex: Vale, QR Code..."></div>' +
+      '<div class="field"><label>Valor</label><input type="number" id="lancOutrosVal" placeholder="0.00" step="0.01" inputmode="decimal"></div>' +
+    '</div>' +
     '<div class="msg" id="lancMsg"></div>' +
     '<button class="btn btn-primary" onclick="salvarLanc()" style="margin-bottom:16px;">Registrar entrada</button>' +
     '<div class="divider"></div>' +
@@ -1184,14 +1188,24 @@ async function salvarLanc() {
   var pix = parseFloat(document.getElementById('lancPix').value) || 0;
   var deb = parseFloat(document.getElementById('lancDeb').value) || 0;
   var cred = parseFloat(document.getElementById('lancCred').value) || 0;
-  if (din + pix + deb + cred <= 0) { showMsg('lancMsg', 'Informe ao menos um valor.', 'err'); return; }
+  var outrosDesc = (document.getElementById('lancOutrosDesc') ? document.getElementById('lancOutrosDesc').value.trim() : '') || 'Outros';
+  var outrosVal = parseFloat(document.getElementById('lancOutrosVal') ? document.getElementById('lancOutrosVal').value : 0) || 0;
+  if (din + pix + deb + cred + outrosVal <= 0) { showMsg('lancMsg', 'Informe ao menos um valor.', 'err'); return; }
   var ex = lancamentos.find(function(l) { return l.data === data; });
-  var lanc = ex ? {id:ex.id, data:data, dinheiro:(+ex.dinheiro||0)+din, pix:(+ex.pix||0)+pix, debito:(+ex.debito||0)+deb, credito:(+ex.credito||0)+cred, mes_ano:MES_ANO, user_id:userId} : {data:data, dinheiro:din, pix:pix, debito:deb, credito:cred, mes_ano:MES_ANO, user_id:userId};
+  var lanc = ex ? {id:ex.id, data:data, dinheiro:(+ex.dinheiro||0)+din, pix:(+ex.pix||0)+pix, debito:(+ex.debito||0)+deb, credito:(+ex.credito||0)+cred+outrosVal, mes_ano:MES_ANO, user_id:userId} : {data:data, dinheiro:din, pix:pix, debito:deb, credito:cred+outrosVal, mes_ano:MES_ANO, user_id:userId};
   showMsg('lancMsg', 'Salvando...', 'warn');
   try {
     await sb('lancamentos', {method:'POST', headers:{'Prefer':'resolution=merge-duplicates,return=representation'}, body:JSON.stringify(lanc)});
+    // Se tiver valor em outros, registrar como observacao no lancamento
+    if (outrosVal > 0) {
+      // Salvar descricao do outros no obs do lancamento
+      await sb('lancamentos?id=eq.' + (ex ? ex.id : ''), {method:'PATCH', body:JSON.stringify({obs: outrosDesc + ': R$ ' + outrosVal.toFixed(2)})}).catch(function(){});
+    }
     showMsg('lancMsg', 'Salvo!', 'ok');
     await carregarDados();
+    // Limpar campos outros
+    if (document.getElementById('lancOutrosDesc')) document.getElementById('lancOutrosDesc').value = '';
+    if (document.getElementById('lancOutrosVal')) document.getElementById('lancOutrosVal').value = '';
   } catch(e) { showMsg('lancMsg', 'Erro: ' + e.message, 'err'); }
 }
 
