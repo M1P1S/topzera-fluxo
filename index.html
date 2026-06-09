@@ -581,7 +581,13 @@ async function carregarDados() {
 
 function calcTotais() {
   var fatVendas = lancamentos.reduce(function(a, l) { return a + (+l.dinheiro || 0) + (+l.pix || 0) + (+l.debito || 0) + (+l.credito || 0); }, 0);
+  var fatDinheiro = lancamentos.reduce(function(a, l) { return a + (+l.dinheiro || 0); }, 0);
+  var fatConta = lancamentos.reduce(function(a, l) { return a + (+l.pix || 0) + (+l.debito || 0) + (+l.credito || 0); }, 0);
   var fatPDV = vendas.reduce(function(a, v) { return a + (+v.total_final || 0); }, 0);
+  var fatPDVDinheiro = vendas.filter(function(v){return v.forma_pagamento==='dinheiro';}).reduce(function(a,v){return a+(+v.total_final||0);},0);
+  var fatPDVConta = vendas.filter(function(v){return v.forma_pagamento!=='dinheiro';}).reduce(function(a,v){return a+(+v.total_final||0);},0);
+  var totalDinheiro = fatDinheiro + fatPDVDinheiro;
+  var totalConta = fatConta + fatPDVConta;
   var fatPlat = receitas.reduce(function(a, r) { return a + (+r.valor || 0); }, 0);
   var totalFat = fatVendas + fatPDV + fatPlat;
   var totalReinvest = Math.round((fatVendas + fatPDV) * REINVEST * 100) / 100;
@@ -592,7 +598,7 @@ function calcTotais() {
   var saldoConta = saldoInicial.valor + totalLiquido + fatPlat - totalDespPagas - totalSaidas;
   var saldoTotal = saldoConta + caixaFixoAtual.valor;
   var metaMes = perfil.meta_mensal || 9500;
-  return {fatVendas:fatVendas, fatPDV:fatPDV, fatPlat:fatPlat, totalFat:totalFat, totalReinvest:totalReinvest, totalReinvestUsado:totalReinvestUsado, totalLiquido:totalLiquido, totalDespPagas:totalDespPagas, totalSaidas:totalSaidas, saldoConta:saldoConta, saldoTotal:saldoTotal, metaMes:metaMes};
+  return {fatVendas:fatVendas, fatPDV:fatPDV, fatDinheiro:fatDinheiro, fatConta:fatConta, totalDinheiro:totalDinheiro, totalConta:totalConta, fatPlat:fatPlat, totalFat:totalFat, totalReinvest:totalReinvest, totalReinvestUsado:totalReinvestUsado, totalLiquido:totalLiquido, totalDespPagas:totalDespPagas, totalSaidas:totalSaidas, saldoConta:saldoConta, saldoTotal:saldoTotal, metaMes:metaMes};
 }
 
 function fatHoje() {
@@ -628,6 +634,77 @@ function renderPage(id) {
   else if (id === 'config') renderConfig();
 }
 
+function renderPrestacaoContas() {
+  var html = '';
+  var t = calcTotais();
+
+  // --- DESPESAS FIXAS ---
+  var desp = getDespesas();
+  var totalDesp = desp.reduce(function(a,d){return a+d.val;},0);
+  var totalDespPagas = desp.filter(function(d){return pagamentos[d.dia+'-'+d.desc];}).reduce(function(a,d){return a+d.val;},0);
+  var pctDesp = totalDesp > 0 ? Math.round(totalDespPagas/totalDesp*100) : 0;
+
+  html += '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);margin-bottom:10px;overflow:hidden;">' +
+    '<div style="padding:10px 13px;background:var(--bg3);display:flex;justify-content:space-between;align-items:center;">' +
+      '<span style="font-family:Syne,sans-serif;font-size:12px;font-weight:700;">Despesas fixas</span>' +
+      '<span style="font-size:11px;color:' + (pctDesp===100?'var(--green)':'var(--yellow)') + ';">' + fmt(totalDespPagas) + ' / ' + fmt(totalDesp) + ' (' + pctDesp + '%)</span>' +
+    '</div>';
+  desp.forEach(function(d) {
+    var pago = pagamentos[d.dia+'-'+d.desc] || false;
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 13px;border-top:1px solid var(--border);">' +
+      '<div>' +
+        '<div style="font-size:12px;color:' + (pago?'var(--text3)':'var(--text)') + ';' + (pago?'text-decoration:line-through;':'') + '">' + d.desc + '</div>' +
+        '<div style="font-size:10px;color:var(--text3);">Dia ' + (d.dia||'var') + ' - ' + d.cat + '</div>' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;gap:8px;">' +
+        '<span style="font-size:12px;color:' + (pago?'var(--text3)':'var(--red)') + ';">' + fmt(d.val) + '</span>' +
+        '<button style="width:26px;height:26px;border-radius:50%;border:2px solid ' + (pago?'var(--green)':'var(--border2)') + ';background:' + (pago?'var(--green)':'transparent') + ';cursor:pointer;font-size:12px;color:' + (pago?'#000':'transparent') + ';" data-dia="' + d.dia + '" data-desc="' + d.desc + '" onclick="togglePagoBtn(this)">✓</button>' +
+      '</div>' +
+    '</div>';
+  });
+  html += '</div>';
+
+  // --- SAIDAS VARIAVEIS ---
+  var totalSaidas = saidas.reduce(function(a,s){return a+(+s.valor||0);},0);
+  html += '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);margin-bottom:10px;overflow:hidden;">' +
+    '<div style="padding:10px 13px;background:var(--bg3);display:flex;justify-content:space-between;align-items:center;">' +
+      '<span style="font-family:Syne,sans-serif;font-size:12px;font-weight:700;">Saidas variaveis</span>' +
+      '<span style="font-size:11px;color:var(--red);">- ' + fmt(totalSaidas) + '</span>' +
+    '</div>';
+  if (saidas.length === 0) {
+    html += '<div style="padding:12px 13px;font-size:12px;color:var(--text3);">Nenhuma saida registrada.</div>';
+  } else {
+    saidas.forEach(function(s) {
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 13px;border-top:1px solid var(--border);">' +
+        '<div><div style="font-size:12px;">' + s.descricao + '</div><div style="font-size:10px;color:var(--text3);">' + s.data + ' - ' + s.categoria + '</div></div>' +
+        '<span style="font-size:12px;color:var(--red);">- ' + fmt(+s.valor) + '</span>' +
+      '</div>';
+    });
+  }
+  html += '</div>';
+
+  // --- REINVESTIMENTOS ---
+  var totalReinvest = reinvestimentos.reduce(function(a,r){return a+(+r.valor||0);},0);
+  html += '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);margin-bottom:10px;overflow:hidden;">' +
+    '<div style="padding:10px 13px;background:var(--bg3);display:flex;justify-content:space-between;align-items:center;">' +
+      '<span style="font-family:Syne,sans-serif;font-size:12px;font-weight:700;">Reinvestimentos</span>' +
+      '<span style="font-size:11px;color:var(--yellow);">- ' + fmt(totalReinvest) + ' / dispon. ' + fmt(t.totalReinvest) + '</span>' +
+    '</div>';
+  if (reinvestimentos.length === 0) {
+    html += '<div style="padding:12px 13px;font-size:12px;color:var(--text3);">Nenhum reinvestimento registrado.</div>';
+  } else {
+    reinvestimentos.forEach(function(r) {
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 13px;border-top:1px solid var(--border);">' +
+        '<div><div style="font-size:12px;">' + (r.descricao||r.tipo) + '</div><div style="font-size:10px;color:var(--text3);">' + r.data + ' - ' + r.tipo + (r.fornecedor?' - '+r.fornecedor:'') + '</div></div>' +
+        '<span style="font-size:12px;color:var(--yellow);">- ' + fmt(+r.valor) + '</span>' +
+      '</div>';
+    });
+  }
+  html += '</div>';
+
+  return html;
+}
+
 function renderDashboard() {
   var t = calcTotais();
   var fh = fatHoje();
@@ -651,6 +728,8 @@ function renderDashboard() {
     ['Saldo inicial (' + saldoInicial.data + ')', fmt(saldoInicial.valor), 'var(--text2)'],
       ['Vendas PDV', fmt(t.fatPDV), 'var(--green)'],
     ['Entradas manuais', fmt(t.fatVendas), 'var(--green)'],
+    ['  ↳ Dinheiro', fmt(t.fatDinheiro + t.fatPDVDinheiro), 'var(--green)'],
+    ['  ↳ Conta (Pix/Deb/Cred)', fmt(t.fatConta + t.fatPDVConta), 'var(--green)'],
     ['Receitas externas', fmt(t.fatPlat), 'var(--green)'],
     ['Reinvest. usado', '- ' + fmt(t.totalReinvestUsado), 'var(--yellow)'],
     ['Reinvest. total (35%)', fmt(t.totalReinvest), 'var(--yellow)'],
@@ -674,6 +753,10 @@ function renderDashboard() {
     '<div class="card yellow"><div class="cl">Reinvestir</div><div class="cv">' + fmt(t.totalReinvest) + '</div><div class="cs">Usado: ' + fmt(t.totalReinvestUsado) + ' | Saldo: ' + fmt(Math.max(0, t.totalReinvest - t.totalReinvestUsado)) + '</div></div>' +
     '<div class="card purple"><div class="cl">Caixa fixo</div><div class="cv">' + fmt(caixaFixoAtual.valor) + '</div><div class="cs"><button class="btn btn-sm btn-blue-sm" onclick="abrirConfigModal(&quot;caixaFixo&quot;)">Atualizar</button></div></div>' +
     '</div>' +
+    '<div class="card-grid" style="margin-bottom:12px;">' +
+    '<div class="card green"><div class="cl">💵 Dinheiro</div><div class="cv">' + fmt(t.totalDinheiro) + '</div><div class="cs">em especie no mes</div></div>' +
+    '<div class="card blue"><div class="cl">🏦 Conta digital</div><div class="cv">' + fmt(t.totalConta) + '</div><div class="cs">Pix + Debito + Credito</div></div>' +
+    '</div>' +
     alertas +
     '<div class="sec">Meta de hoje</div>' +
     '<div class="pw"><div class="pr"><span>' + fmt(fh) + '</span><span>Meta: R$ 365</span></div><div class="pb"><div class="pf" style="width:' + pctHoje + '%;background:' + (fh >= 365 ? 'var(--green)' : fh >= 200 ? 'var(--yellow)' : 'var(--red)') + ';"></div></div></div>' +
@@ -683,6 +766,8 @@ function renderDashboard() {
     '<div class="card full" style="margin-bottom:10px;">' + resumoHtml + '</div>' +
     (baixo.length > 0 ? '<div class="sec">Estoque baixo</div>' + baixo.map(function(p) { return '<div class="li"><div class="li-info"><div class="li-title">' + p.nome + '</div><div class="li-sub">Atual: ' + p.estoque_atual + ' ' + p.unidade + '</div></div><span class="badge bg-red">Repor</span></div>'; }).join('') : '') +
     (proximas.length > 0 ? '<div class="sec">Proximas despesas</div>' + proximasHtml : '') +
+    '<div class="sec">Prestacao de contas</div>' +
+    renderPrestacaoContas() +
     '<div class="sec">Acoes rapidas</div>' +
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">' +
     '<button class="btn btn-green-sm" style="width:100%;padding:12px;" onclick="showPage(&quot;pdv&quot;,document.querySelectorAll(&quot;.nav-btn&quot;)[1])">Abrir PDV</button>' +
