@@ -823,7 +823,7 @@ function renderDashboard() {
     '<button class="btn btn-green-sm" style="width:100%;padding:12px;" onclick="showPage(&quot;pdv&quot;,document.querySelectorAll(&quot;.nav-btn&quot;)[1])">Abrir PDV</button>' +
     '<button class="btn btn-danger-sm" style="width:100%;padding:12px;" onclick="abrirSaidaModal()">Saida</button>' +
     '</div>' +
-    (fechamentos.length > 0 && fechamentos[0].data === hoje() ? '<div class="alert alert-green" style="margin-bottom:8px;">✓ Caixa fechado hoje | Diferenca: ' + fmtS(+fechamentos[0].diferenca) + '</div>' : '<div class="alert alert-yellow" style="margin-bottom:8px;">⚠️ Caixa nao fechado hoje — <a onclick="showPage(\'lancar\',document.querySelectorAll(\'.nav-btn\')[2])" style="cursor:pointer;text-decoration:underline;">Fechar agora</a></div>') +
+    (fechamentos.length > 0 && fechamentos[0].data === hoje() ? '<div class="alert alert-green" style="margin-bottom:8px;">✓ Caixa fechado hoje | Diferenca: ' + fmtS(+fechamentos[0].diferenca) + '</div>' : '<div class="alert alert-yellow" style="margin-bottom:8px;">⚠️ Caixa nao fechado hoje — <a onclick="showPage(\'lancar\',document.querySelectorAll(\'.nav-btn\')[2])" style="cursor:pointer;text-decoration:underline;">Fechar agora</a></div>');
 }
 
 function renderPDV() {
