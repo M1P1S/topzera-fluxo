@@ -327,6 +327,22 @@ body{font-family:"DM Mono",monospace;background:var(--bg);color:var(--text);min-
   </div>
 </div>
 
+<div class="mo" id="moFechamento">
+  <div class="mo-body">
+    <div class="mo-handle"></div>
+    <div class="mo-title">Fechar Caixa do Dia</div>
+    <div class="alert alert-blue" style="margin-bottom:12px;" id="fechamentoSistema"></div>
+    <div class="field"><label>Valor em conta digital (banco/Pix)</label><input type="number" id="fechContaVal" placeholder="0.00" step="0.01" inputmode="decimal" oninput="calcDiferencaFechamento()"></div>
+    <div class="field"><label>Dinheiro fisico em maos (sem o caixa fixo)</label><input type="number" id="fechDinVal" placeholder="0.00" step="0.01" inputmode="decimal" oninput="calcDiferencaFechamento()"></div>
+    <div class="field"><label>Caixa fixo (fundo de troco)</label><input type="number" id="fechCfVal" placeholder="0.00" step="0.01" inputmode="decimal" oninput="calcDiferencaFechamento()"></div>
+    <div id="fechamentoDiferenca" style="padding:12px;border-radius:var(--rsm);margin-bottom:12px;display:none;"></div>
+    <div class="field"><label>Observacao</label><input type="text" id="fechObs" placeholder="Opcional"></div>
+    <div class="msg" id="fechMsg"></div>
+    <button class="btn btn-primary" onclick="salvarFechamento()" style="margin-bottom:8px;">Confirmar fechamento</button>
+    <button class="btn btn-outline" onclick="fecharMo('moFechamento')">Cancelar</button>
+  </div>
+</div>
+
 <div class="mo" id="moSaida">
   <div class="mo-body">
     <div class="mo-handle"></div>
@@ -440,6 +456,7 @@ async function logout() {
   caixaFixoAtual = {valor:0, data:hoje()};
   faturamentoHistorico = [];
   aportes = [];
+  fechamentos = [];
   localStorage.removeItem('fc_token');
   localStorage.removeItem('fc_user');
   document.getElementById('app').classList.remove('visible');
@@ -482,7 +499,7 @@ function getMesAno() {
 const MES_ANO = getMesAno();
 const REINVEST = 0.35;
 
-let lancamentos = [], pagamentos = {}, receitas = [], saidas = [], vendas = [], produtos = [], categorias = [], fornecedores = [], reinvestimentos = [], despesasFixas = [], faturamentoHistorico = [], aportes = [];
+let lancamentos = [], pagamentos = {}, receitas = [], saidas = [], vendas = [], produtos = [], categorias = [], fornecedores = [], reinvestimentos = [], despesasFixas = [], faturamentoHistorico = [], aportes = [], fechamentos = [];
 let saldoInicial = {valor:0, data:new Date().toISOString().split('T')[0], obs:''};
 let caixaFixoAtual = {valor:0, data:new Date().toISOString().split('T')[0]};
 let despesasExtra = [];
@@ -564,6 +581,7 @@ async function carregarDados() {
   caixaFixoAtual = {valor:0, data:hoje()};
   faturamentoHistorico = [];
   aportes = [];
+  fechamentos = [];
   despesasExtra = JSON.parse(localStorage.getItem('fc_desp_' + userId) || '[]');
   try {
     var uid = userId;
@@ -580,6 +598,7 @@ async function carregarDados() {
       sb('despesas_fixas?user_id=eq.' + uid + '&ativo=eq.true&order=sem.asc,dia.asc').catch(function() { return []; }),
       sb('faturamento_historico?user_id=eq.' + uid + '&order=mes_ano.asc').catch(function() { return []; }),
       sb('aportes?user_id=eq.' + uid + '&mes_ano=eq.' + MES_ANO + '&order=data.asc').catch(function() { return []; }),
+      sb('fechamento_caixa?user_id=eq.' + uid + '&mes_ano=eq.' + MES_ANO + '&order=data.desc').catch(function() { return []; }),
       sb('configuracoes?user_id=eq.' + uid).catch(function() { return []; }),
       sb('caixa_fixo?user_id=eq.' + uid + '&order=data.desc&limit=1').catch(function() { return []; })
     ]);
@@ -596,8 +615,9 @@ async function carregarDados() {
     despesasFixas = Array.isArray(results[9]) ? results[9].map(function(d) { return {id:d.id, desc:d.descricao, val:+d.valor, dia:d.dia, sem:d.sem, cat:d.cat}; }) : [];
     faturamentoHistorico = Array.isArray(results[10]) ? results[10] : [];
     aportes = Array.isArray(results[11]) ? results[11] : [];
-    var configs = Array.isArray(results[12]) ? results[12] : [];
-    var cf = Array.isArray(results[13]) ? results[13] : [];
+    fechamentos = Array.isArray(results[12]) ? results[12] : [];
+    var configs = Array.isArray(results[13]) ? results[13] : [];
+    var cf = Array.isArray(results[14]) ? results[14] : [];
     var si = configs.find(function(c) { return c.chave === 'saldo_inicial'; });
     if (si) {
       try { var d = JSON.parse(si.valor); saldoInicial = {valor:+d.valor || 0, data:d.data || hoje(), obs:d.obs || ''}; }
@@ -802,7 +822,8 @@ function renderDashboard() {
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">' +
     '<button class="btn btn-green-sm" style="width:100%;padding:12px;" onclick="showPage(&quot;pdv&quot;,document.querySelectorAll(&quot;.nav-btn&quot;)[1])">Abrir PDV</button>' +
     '<button class="btn btn-danger-sm" style="width:100%;padding:12px;" onclick="abrirSaidaModal()">Saida</button>' +
-    '</div>';
+    '</div>' +
+    (fechamentos.length > 0 && fechamentos[0].data === hoje() ? '<div class="alert alert-green" style="margin-bottom:8px;">✓ Caixa fechado hoje | Diferenca: ' + fmtS(+fechamentos[0].diferenca) + '</div>' : '<div class="alert alert-yellow" style="margin-bottom:8px;">⚠️ Caixa nao fechado hoje — <a onclick="showPage(\'lancar\',document.querySelectorAll(\'.nav-btn\')[2])" style="cursor:pointer;text-decoration:underline;">Fechar agora</a></div>') +
 }
 
 function renderPDV() {
@@ -981,8 +1002,10 @@ function renderLancar() {
       '<div class="field"><label>Outros (descricao)</label><input type="text" id="lancOutrosDesc" placeholder="Ex: Vale, QR Code..."></div>' +
       '<div class="field"><label>Valor</label><input type="number" id="lancOutrosVal" placeholder="0.00" step="0.01" inputmode="decimal"></div>' +
     '</div>' +
+    '<div class="divider"></div>' +
+    '<div class="field"><label>📦 Caixa fixo no fechamento (fundo de troco)</label><input type="number" id="lancCaixaFixo" placeholder="' + (caixaFixoAtual.valor || '0.00') + '" step="0.01" inputmode="decimal" value="' + (caixaFixoAtual.valor || '') + '"></div>' +
     '<div class="msg" id="lancMsg"></div>' +
-    '<button class="btn btn-primary" onclick="salvarLanc()" style="margin-bottom:16px;">Registrar entrada</button>' +
+    '<button class="btn btn-primary" onclick="salvarLanc()" style="margin-bottom:16px;">✓ Registrar e fechar caixa do dia</button>' +
     '<div class="divider"></div>' +
     '<div class="sec">Aportes pessoais <button class="btn btn-sm btn-blue-sm" onclick="abrirAporteModal()">+ Novo</button></div>' +
     '<div class="alert alert-blue" style="margin-bottom:8px;font-size:11px;">Dinheiro pessoal investido no negocio. Aparece separado do faturamento no resumo.</div>' +
@@ -1006,8 +1029,99 @@ function renderLancar() {
     '<div class="sec">Saidas <button class="btn btn-sm btn-danger-sm" onclick="abrirSaidaModal()">+ Nova</button></div>' +
     saidaHtml +
     '<div class="divider"></div>' +
+    '<div class="sec">Fechamento do Dia</div>' +
+    renderFechamentoInline() +
+    '<div class="divider"></div>' +
     '<div class="sec">Historico</div>' +
     lancHtml;
+}
+
+function renderFechamentoInline() {
+  var t = calcTotais();
+  var fechHoje = fechamentos.find(function(f) { return f.data === hoje(); });
+
+  // Calcular entradas do dia de hoje
+  var lancHoje = lancamentos.find(function(l) { return l.data === hoje(); });
+  var vendasHoje = vendas.filter(function(v) { return v.data === hoje(); });
+  var dinHoje = (lancHoje ? +lancHoje.dinheiro || 0 : 0) + vendasHoje.filter(function(v){return v.forma_pagamento==='dinheiro';}).reduce(function(a,v){return a+(+v.total_final||0);},0);
+  var pixHoje = (lancHoje ? +lancHoje.pix || 0 : 0) + vendasHoje.filter(function(v){return v.forma_pagamento==='pix';}).reduce(function(a,v){return a+(+v.total_final||0);},0);
+  var debHoje = (lancHoje ? +lancHoje.debito || 0 : 0) + vendasHoje.filter(function(v){return v.forma_pagamento==='debito';}).reduce(function(a,v){return a+(+v.total_final||0);},0);
+  var credHoje = (lancHoje ? +lancHoje.credito || 0 : 0) + vendasHoje.filter(function(v){return v.forma_pagamento==='credito'||v.forma_pagamento==='outros';}).reduce(function(a,v){return a+(+v.total_final||0);},0);
+  var totalDia = dinHoje + pixHoje + debHoje + credHoje;
+  var saidasHoje = saidas.filter(function(s){return s.data===hoje();}).reduce(function(a,s){return a+(+s.valor||0);},0);
+  var saldoEsperado = caixaFixoAtual.valor + totalDia - saidasHoje;
+  var html = '';
+
+  if (fechHoje) {
+    // Ja fechou hoje
+    html += '<div style="background:var(--green-bg);border:1px solid var(--green2);border-radius:var(--r);padding:14px;margin-bottom:10px;">' +
+      '<div style="font-family:Syne,sans-serif;font-size:13px;font-weight:700;color:var(--green);margin-bottom:8px;">✓ Caixa fechado — ' + fechHoje.data + '</div>' +
+      '<div style="font-size:11px;color:var(--text2);margin-bottom:4px;">Em maos: ' + fmt(+fechHoje.valor_em_maos) + ' | Caixa fixo: ' + fmt(+fechHoje.caixa_fixo) + '</div>' +
+      '<div style="font-size:12px;">Diferenca: <strong style="color:' + (Math.abs(+fechHoje.diferenca)<0.01?'var(--green)':+fechHoje.diferenca>0?'var(--green)':'var(--red)') + ';">' + fmtS(+fechHoje.diferenca) + '</strong>' +
+      (Math.abs(+fechHoje.diferenca)>=0.01?' (saldo ajustado automaticamente)':'') + '</div>' +
+      '<button class="btn btn-sm btn-yellow-sm" style="margin-top:10px;" onclick="reabrirFechamento()">Corrigir fechamento</button>' +
+    '</div>';
+  } else {
+    // Resumo do dia estilo Nextar
+    html += '<div style="background:var(--bg2);border:1px solid #5b21b6;border-radius:var(--r);overflow:hidden;margin-bottom:10px;">' +
+      // Header
+      '<div style="background:var(--purple-bg);padding:12px 14px;border-bottom:1px solid #5b21b6;">' +
+        '<div style="font-family:Syne,sans-serif;font-size:13px;font-weight:700;color:var(--purple);">Resumo do Caixa — ' + hoje() + '</div>' +
+      '</div>' +
+      // Saldo abertura
+      '<div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;font-size:12px;">' +
+        '<span style="color:var(--text3);">Saldo abertura (caixa fixo)</span>' +
+        '<span style="color:var(--purple);">' + fmt(caixaFixoAtual.valor) + '</span>' +
+      '</div>' +
+      // Entradas por forma
+      '<div style="padding:8px 14px 4px;border-bottom:1px solid var(--border);">' +
+        '<div style="font-size:10px;color:var(--text3);text-transform:uppercase;margin-bottom:6px;">Entradas de hoje</div>' +
+        (dinHoje>0?'<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;"><span>💵 Dinheiro</span><span style="color:var(--green);">' + fmt(dinHoje) + '</span></div>':'') +
+        (pixHoje>0?'<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;"><span>📱 Pix</span><span style="color:var(--green);">' + fmt(pixHoje) + '</span></div>':'') +
+        (debHoje>0?'<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;"><span>🔵 Debito</span><span style="color:var(--green);">' + fmt(debHoje) + '</span></div>':'') +
+        (credHoje>0?'<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;"><span>💳 Credito/Outros</span><span style="color:var(--green);">' + fmt(credHoje) + '</span></div>':'') +
+        (totalDia===0?'<div style="font-size:12px;color:var(--text3);padding:4px 0;">Nenhuma entrada lancada hoje.</div>':'') +
+        '<div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-top:1px solid var(--border);margin-top:4px;font-weight:600;"><span>Total entradas</span><span style="color:var(--green);">' + fmt(totalDia) + '</span></div>' +
+      '</div>' +
+      // Saidas do dia
+      (saidasHoje>0?'<div style="padding:8px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;font-size:12px;"><span style="color:var(--text3);">Saidas do dia</span><span style="color:var(--red);">- ' + fmt(saidasHoje) + '</span></div>':'') +
+      // Saldo esperado
+      '<div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;font-size:13px;font-weight:700;">' +
+        '<span>Saldo esperado</span>' +
+        '<span style="color:var(--green);">' + fmt(saldoEsperado) + '</span>' +
+      '</div>' +
+      // Formulario de conferencia
+      '<div style="padding:14px;">' +
+        '<div style="font-size:11px;color:var(--text3);margin-bottom:10px;">Confira o que tem em maos e informe abaixo:</div>' +
+        '<div class="field"><label>💵 Dinheiro fisico em maos</label><input type="number" id="fechDinVal" placeholder="0.00" step="0.01" inputmode="decimal" oninput="calcDiferencaFechamento()"></div>' +
+        '<div class="field"><label>📦 Caixa fixo (fundo de troco)</label><input type="number" id="fechCfVal" placeholder="0.00" step="0.01" inputmode="decimal" value="' + (caixaFixoAtual.valor||'') + '" oninput="calcDiferencaFechamento()"></div>' +
+        '<div style="font-size:11px;color:var(--text3);margin-bottom:6px;">💳 Pix/Debito/Credito entram automaticamente via banco — nao precisa informar</div>' +
+        '<div id="fechamentoDiferenca" style="display:none;padding:10px;border-radius:var(--rsm);margin-bottom:10px;"></div>' +
+        '<div class="field"><label>Observacao</label><input type="text" id="fechObs" placeholder="Opcional"></div>' +
+        '<div class="msg" id="fechMsg"></div>' +
+        '<button class="btn btn-primary" onclick="salvarFechamento()">🔒 Fechar Caixa</button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  // Historico de fechamentos
+  if (fechamentos.length > 0) {
+    html += '<div class="sec" style="margin-top:4px;">Historico de fechamentos</div>';
+    html += fechamentos.slice(0,5).map(function(f){
+      return '<div class="li" style="margin-bottom:6px;">' +
+        '<div class="li-info"><div class="li-title" style="font-size:12px;">' + f.data + '</div>' +
+        '<div class="li-sub">Em maos: ' + fmt(+f.valor_em_maos) + ' | CF: ' + fmt(+f.caixa_fixo) + (f.obs?' | '+f.obs:'') + '</div></div>' +
+        '<div style="text-align:right;"><div style="font-size:12px;font-weight:700;color:' + (Math.abs(+f.diferenca)<0.01?'var(--green)':+f.diferenca>0?'var(--green)':'var(--red)') + ';">' + fmtS(+f.diferenca) + '</div>' +
+        '<div style="font-size:10px;color:var(--text3);">diferenca</div></div>' +
+      '</div>';
+    }).join('');
+  }
+
+  return html;
+}
+function reabrirFechamento() {
+  fechamentos = fechamentos.filter(function(f) { return f.data !== hoje(); });
+  renderLancar();
 }
 
 function renderGraficos() {
@@ -1241,6 +1355,17 @@ async function salvarLanc() {
       // Salvar descricao do outros no obs do lancamento
       await sb('lancamentos?id=eq.' + (ex ? ex.id : ''), {method:'PATCH', body:JSON.stringify({obs: outrosDesc + ': R$ ' + outrosVal.toFixed(2)})}).catch(function(){});
     }
+    // Atualizar caixa fixo se informado
+    var cfVal = parseFloat(document.getElementById('lancCaixaFixo') ? document.getElementById('lancCaixaFixo').value : 0) || 0;
+    if (cfVal > 0 && cfVal !== caixaFixoAtual.valor) {
+      var existeCf = await sb('caixa_fixo?data=eq.' + data + '&user_id=eq.' + userId);
+      if (existeCf && existeCf.length > 0) {
+        await sb('caixa_fixo?data=eq.' + data + '&user_id=eq.' + userId, {method:'PATCH', body:JSON.stringify({valor:cfVal})});
+      } else {
+        await sb('caixa_fixo', {method:'POST', body:JSON.stringify({valor:cfVal, data:data, user_id:userId, obs:'Fechamento diario'})});
+      }
+      caixaFixoAtual = {valor:cfVal, data:data};
+    }
     showMsg('lancMsg', 'Salvo!', 'ok');
     await carregarDados();
     // Limpar campos outros
@@ -1248,7 +1373,7 @@ async function salvarLanc() {
     if (document.getElementById('lancOutrosVal')) document.getElementById('lancOutrosVal').value = '';
     // Resetar botão se estava em modo edição
     var btn = document.querySelector('#page-lancar .btn-primary');
-    if (btn) { btn.textContent = 'Registrar entrada'; btn.style.background = ''; }
+    if (btn) { btn.textContent = '✓ Registrar e fechar caixa do dia'; btn.style.background = ''; }
     if (document.getElementById('lancData')) delete document.getElementById('lancData').dataset.editId;
   } catch(e) { showMsg('lancMsg', 'Erro: ' + e.message, 'err'); }
 }
@@ -1369,6 +1494,89 @@ async function deletarReinvest(id) {
   reinvestimentos = reinvestimentos.filter(function(r) { return r.id !== id; });
   renderAll();
   try { await sb('reinvestimentos?id=eq.' + id, {method:'DELETE'}); } catch(e) {}
+}
+
+function abrirFechamentoCaixa() {
+  var t = calcTotais();
+  document.getElementById('fechamentoSistema').innerHTML =
+    'Saldo calculado pelo sistema:<br>' +
+    '<strong>Saldo conta: ' + fmtS(t.saldoConta) + '</strong> | Caixa fixo: ' + fmt(caixaFixoAtual.valor) + '<br>' +
+    '<strong>Saldo total: ' + fmtS(t.saldoTotal) + '</strong>';
+  document.getElementById('fechContaVal').value = '';
+  document.getElementById('fechDinVal').value = '';
+  document.getElementById('fechCfVal').value = caixaFixoAtual.valor || '';
+  document.getElementById('fechamentoDiferenca').style.display = 'none';
+  document.getElementById('fechMsg').textContent = '';
+  document.getElementById('fechObs').value = '';
+  document.getElementById('moFechamento').classList.add('open');
+}
+
+function calcDiferencaFechamento() {
+  var din = parseFloat(document.getElementById('fechDinVal') ? document.getElementById('fechDinVal').value : 0) || 0;
+  var cf = parseFloat(document.getElementById('fechCfVal') ? document.getElementById('fechCfVal').value : 0) || 0;
+  if (din + cf <= 0) { var el2 = document.getElementById('fechamentoDiferenca'); if(el2) el2.style.display = 'none'; return; }
+  // Calcular digital automaticamente (Pix + Debito + Credito de hoje)
+  var lancHoje2 = lancamentos.find(function(l) { return l.data === hoje(); });
+  var vendasHoje2 = vendas.filter(function(v) { return v.data === hoje(); });
+  var digitalHoje = (lancHoje2 ? (+lancHoje2.pix||0)+(+lancHoje2.debito||0)+(+lancHoje2.credito||0) : 0) +
+    vendasHoje2.filter(function(v){return v.forma_pagamento!=='dinheiro';}).reduce(function(a,v){return a+(+v.total_final||0);},0);
+  var totalInformado = din + cf + digitalHoje;
+  var t = calcTotais();
+  var diferenca = totalInformado - t.saldoTotal;
+  var el = document.getElementById('fechamentoDiferenca');
+  el.style.display = 'block';
+  el.style.background = Math.abs(diferenca) < 1 ? 'var(--green-bg)' : 'var(--yellow-bg)';
+  el.style.border = '1px solid ' + (Math.abs(diferenca) < 1 ? 'var(--green2)' : '#854d0e');
+  el.innerHTML =
+    '<div style="font-size:11px;margin-bottom:4px;">' +
+    'Total informado: <strong>' + fmt(totalInformado) + '</strong> | ' +
+    'Sistema: <strong>' + fmtS(t.saldoTotal) + '</strong>' +
+    '</div>' +
+    '<div style="font-size:13px;font-weight:700;color:' + (Math.abs(diferenca) < 1 ? 'var(--green)' : diferenca > 0 ? 'var(--green)' : 'var(--red)') + ';">' +
+    (Math.abs(diferenca) < 1 ? '✓ Caixa fechado corretamente!' : 'Diferenca: ' + fmtS(diferenca)) +
+    '</div>';
+}
+
+async function salvarFechamento() {
+  var din = parseFloat(document.getElementById('fechDinVal') ? document.getElementById('fechDinVal').value : 0) || 0;
+  var cf = parseFloat(document.getElementById('fechCfVal') ? document.getElementById('fechCfVal').value : 0) || 0;
+  var obs = document.getElementById('fechObs') ? document.getElementById('fechObs').value.trim() : '';
+  if (din <= 0 && cf <= 0) { showMsg('fechMsg', 'Informe o dinheiro em maos.', 'err'); return; }
+  // Digital calculado automaticamente
+  var lancHoje3 = lancamentos.find(function(l) { return l.data === hoje(); });
+  var vendasHoje3 = vendas.filter(function(v) { return v.data === hoje(); });
+  var digitalHoje2 = (lancHoje3 ? (+lancHoje3.pix||0)+(+lancHoje3.debito||0)+(+lancHoje3.credito||0) : 0) +
+    vendasHoje3.filter(function(v){return v.forma_pagamento!=='dinheiro';}).reduce(function(a,v){return a+(+v.total_final||0);},0);
+  var totalEmMaos = din + digitalHoje2;
+  var t = calcTotais();
+  var diferenca = (totalEmMaos + cf) - t.saldoTotal;
+  showMsg('fechMsg', 'Salvando...', 'warn');
+  try {
+    // Salvar fechamento
+    await sb('fechamento_caixa', {method:'POST', headers:{'Prefer':'resolution=merge-duplicates,return=representation'}, body:JSON.stringify({
+      user_id:userId, data:hoje(), mes_ano:MES_ANO,
+      valor_em_maos:totalEmMaos, caixa_fixo:cf, valor_conta:conta,
+      saldo_sistema:t.saldoTotal, diferenca:diferenca, obs:obs
+    })});
+    // Atualizar caixa fixo se mudou
+    if (cf !== caixaFixoAtual.valor) {
+      var existeCf = await sb('caixa_fixo?data=eq.' + hoje() + '&user_id=eq.' + userId);
+      if (existeCf && existeCf.length > 0) {
+        await sb('caixa_fixo?data=eq.' + hoje() + '&user_id=eq.' + userId, {method:'PATCH', body:JSON.stringify({valor:cf})});
+      } else {
+        await sb('caixa_fixo', {method:'POST', body:JSON.stringify({valor:cf, data:hoje(), user_id:userId, obs:'Fechamento de caixa'})});
+      }
+      caixaFixoAtual = {valor:cf, data:hoje()};
+    }
+    // Se houver diferenca, ajustar saldo inicial automaticamente
+    if (Math.abs(diferenca) >= 0.01) {
+      var novoSaldoInicial = saldoInicial.valor + diferenca;
+      await sb('configuracoes?chave=eq.saldo_inicial&user_id=eq.' + userId, {method:'PATCH', body:JSON.stringify({valor:JSON.stringify({valor:novoSaldoInicial, data:saldoInicial.data, obs:saldoInicial.obs})})});
+      saldoInicial.valor = novoSaldoInicial;
+    }
+    showMsg('fechMsg', 'Caixa fechado!', 'ok');
+    setTimeout(function() { fecharMo('moFechamento'); carregarDados(); }, 800);
+  } catch(e) { showMsg('fechMsg', 'Erro: ' + e.message, 'err'); }
 }
 
 function abrirSaidaModal() {
