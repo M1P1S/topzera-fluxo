@@ -196,6 +196,7 @@ body{font-family:"DM Mono",monospace;background:var(--bg);color:var(--text);min-
       <span id="headerComercio">Carregando...</span>
       <span id="headerMes"></span>
     </div>
+    <div id="headerCaixaStatus" style="font-size:10px;margin-top:2px;"></div>
   </div>
   <div class="page active" id="page-dashboard"></div>
   <div class="page" id="page-pdv"></div>
@@ -290,6 +291,21 @@ body{font-family:"DM Mono",monospace;background:var(--bg);color:var(--text);min-
     <div id="moConfigContent"></div>
   </div>
 </div>
+<div class="mo" id="moAbertura">
+  <div class="mo-body">
+    <div class="mo-handle"></div>
+    <div class="mo-title">Abrir Caixa</div>
+    <div class="alert alert-green" style="margin-bottom:12px;">Informe o valor do fundo de troco para iniciar o dia.</div>
+    <div style="background:var(--bg3);border-radius:var(--r);padding:12px;margin-bottom:12px;font-size:12px;color:var(--text2);">
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px;"><span>Data</span><span id="aberturaDataLabel" style="color:var(--text);"></span></div>
+    </div>
+    <div class="field"><label>Caixa fixo de abertura (fundo de troco)</label><input type="number" id="abertCfVal" placeholder="0.00" step="0.01" inputmode="decimal"></div>
+    <div class="msg" id="abertMsg"></div>
+    <button class="btn btn-primary" onclick="confirmarAbertura()" style="margin-bottom:8px;">Abrir Caixa</button>
+    <button class="btn btn-outline" onclick="fecharMo('moAbertura')">Cancelar</button>
+  </div>
+</div>
+
 <div class="mo" id="moAporte">
   <div class="mo-body">
     <div class="mo-handle"></div>
@@ -457,6 +473,8 @@ async function logout() {
   faturamentoHistorico = [];
   aportes = [];
   fechamentos = [];
+  aberturas = [];
+  caixaAberto = null;
   localStorage.removeItem('fc_token');
   localStorage.removeItem('fc_user');
   document.getElementById('app').classList.remove('visible');
@@ -469,6 +487,58 @@ function mostrarApp() {
   const agora = new Date();
   document.getElementById('headerMes').textContent = agora.toLocaleDateString('pt-BR', {month:'long', year:'numeric'});
   carregarDados();
+}
+
+function verificarAberturaCaixa() {
+  // Verificar se tem caixa aberto hoje após carregar dados
+  if (!caixaAberto) {
+    // Verificar se tem fechamento de hoje (pode ter esquecido de abrir)
+    var fechHoje = fechamentos.find(function(f) { return f.data === hoje(); });
+    if (!fechHoje) {
+      // Mostrar modal de abertura
+      abrirCaixaModal();
+    }
+  }
+}
+
+function abrirCaixaModal() {
+  document.getElementById('aberturaDataLabel').textContent = new Date().toLocaleDateString('pt-BR', {weekday:'long', day:'2-digit', month:'2-digit', year:'numeric'});
+  document.getElementById('abertCfVal').value = caixaFixoAtual.valor || '';
+  document.getElementById('abertMsg').textContent = '';
+  document.getElementById('moAbertura').classList.add('open');
+}
+
+async function confirmarAbertura() {
+  var cf = parseFloat(document.getElementById('abertCfVal').value) || 0;
+  showMsg('abertMsg', 'Abrindo...', 'warn');
+  try {
+    var res = await sb('abertura_caixa', {method:'POST', headers:{'Prefer':'return=representation'}, body:JSON.stringify({
+      user_id:userId, data:hoje(), mes_ano:MES_ANO, caixa_fixo:cf, status:'aberto'
+    })});
+    // Atualizar caixa fixo
+    if (cf > 0) {
+      var existeCf = await sb('caixa_fixo?data=eq.' + hoje() + '&user_id=eq.' + userId);
+      if (existeCf && existeCf.length > 0) {
+        await sb('caixa_fixo?data=eq.' + hoje() + '&user_id=eq.' + userId, {method:'PATCH', body:JSON.stringify({valor:cf})});
+      } else {
+        await sb('caixa_fixo', {method:'POST', body:JSON.stringify({valor:cf, data:hoje(), user_id:userId, obs:'Abertura de caixa'})});
+      }
+      caixaFixoAtual = {valor:cf, data:hoje()};
+    }
+    caixaAberto = Array.isArray(res) ? res[0] : res;
+    if (Array.isArray(aberturas)) aberturas.unshift(caixaAberto);
+    showMsg('abertMsg', 'Caixa aberto!', 'ok');
+    setTimeout(function() { fecharMo('moAbertura'); renderAll(); }, 700);
+  } catch(e) {
+    // Se já existe abertura para hoje, apenas fechar modal
+    if (e.message && e.message.includes('duplicate')) {
+      caixaAberto = {data:hoje(), status:'aberto'};
+      fecharMo('moAbertura');
+      renderAll();
+    } else {
+      showMsg('abertMsg', 'Erro: ' + e.message, 'err');
+    }
+  }
 }
 
 function mostrarRecuperar() {
@@ -499,7 +569,8 @@ function getMesAno() {
 const MES_ANO = getMesAno();
 const REINVEST = 0.35;
 
-let lancamentos = [], pagamentos = {}, receitas = [], saidas = [], vendas = [], produtos = [], categorias = [], fornecedores = [], reinvestimentos = [], despesasFixas = [], faturamentoHistorico = [], aportes = [], fechamentos = [];
+let lancamentos = [], pagamentos = {}, receitas = [], saidas = [], vendas = [], produtos = [], categorias = [], fornecedores = [], reinvestimentos = [], despesasFixas = [], faturamentoHistorico = [], aportes = [], fechamentos = [], aberturas = [];
+let caixaAberto = null; // abertura do dia atual
 let saldoInicial = {valor:0, data:new Date().toISOString().split('T')[0], obs:''};
 let caixaFixoAtual = {valor:0, data:new Date().toISOString().split('T')[0]};
 let despesasExtra = [];
@@ -582,6 +653,8 @@ async function carregarDados() {
   faturamentoHistorico = [];
   aportes = [];
   fechamentos = [];
+  aberturas = [];
+  caixaAberto = null;
   despesasExtra = JSON.parse(localStorage.getItem('fc_desp_' + userId) || '[]');
   try {
     var uid = userId;
@@ -599,6 +672,7 @@ async function carregarDados() {
       sb('faturamento_historico?user_id=eq.' + uid + '&order=mes_ano.asc').catch(function() { return []; }),
       sb('aportes?user_id=eq.' + uid + '&mes_ano=eq.' + MES_ANO + '&order=data.asc').catch(function() { return []; }),
       sb('fechamento_caixa?user_id=eq.' + uid + '&mes_ano=eq.' + MES_ANO + '&order=data.desc').catch(function() { return []; }),
+      sb('abertura_caixa?user_id=eq.' + uid + '&mes_ano=eq.' + MES_ANO + '&order=data.desc').catch(function() { return []; }),
       sb('configuracoes?user_id=eq.' + uid).catch(function() { return []; }),
       sb('caixa_fixo?user_id=eq.' + uid + '&order=data.desc&limit=1').catch(function() { return []; })
     ]);
@@ -616,8 +690,11 @@ async function carregarDados() {
     faturamentoHistorico = Array.isArray(results[10]) ? results[10] : [];
     aportes = Array.isArray(results[11]) ? results[11] : [];
     fechamentos = Array.isArray(results[12]) ? results[12] : [];
-    var configs = Array.isArray(results[13]) ? results[13] : [];
-    var cf = Array.isArray(results[14]) ? results[14] : [];
+    aberturas = Array.isArray(results[13]) ? results[13] : [];
+    // Verificar se tem caixa aberto hoje
+    caixaAberto = aberturas.find(function(a) { return a.data === hoje() && a.status === 'aberto'; }) || null;
+    var configs = Array.isArray(results[14]) ? results[14] : [];
+    var cf = Array.isArray(results[15]) ? results[15] : [];
     var si = configs.find(function(c) { return c.chave === 'saldo_inicial'; });
     if (si) {
       try { var d = JSON.parse(si.valor); saldoInicial = {valor:+d.valor || 0, data:d.data || hoje(), obs:d.obs || ''}; }
@@ -676,6 +753,20 @@ function showPage(id, btn) {
 }
 
 function renderAll() {
+  // Atualizar status do caixa no header
+  var statusEl = document.getElementById('headerCaixaStatus');
+  if (statusEl) {
+    if (caixaAberto) {
+      statusEl.innerHTML = '<span style="color:var(--green);">● Caixa aberto</span>';
+    } else {
+      var fechHoje = fechamentos.find(function(f) { return f.data === hoje(); });
+      if (fechHoje) {
+        statusEl.innerHTML = '<span style="color:var(--text3);">● Caixa fechado hoje</span>';
+      } else {
+        statusEl.innerHTML = '<span style="color:var(--yellow);cursor:pointer;" onclick="abrirCaixaModal()">● Caixa nao aberto — clique para abrir</span>';
+      }
+    }
+  }
   var a = document.querySelector('.page.active');
   if (a) renderPage(a.id.replace('page-', ''));
 }
@@ -1029,8 +1120,34 @@ function renderLancar() {
     saidaHtml +
 
     '<div class="divider"></div>' +
-    '<div class="sec">Historico</div>' +
+    '<div class="sec">Caixas anteriores</div>' +
+    renderCaixasAnteriores() +
+    '<div class="divider"></div>' +
+    '<div class="sec">Historico de lancamentos</div>' +
     lancHtml;
+}
+
+function renderCaixasAnteriores() {
+  // Mostrar caixas fechados dos últimos 7 dias
+  var fechadoList = fechamentos.filter(function(f) { return f.data !== hoje(); }).slice(0, 7);
+  if (fechadoList.length === 0) {
+    return '<div class="empty" style="margin-bottom:10px;">Nenhum caixa anterior.</div>';
+  }
+  return fechadoList.map(function(f) {
+    var d = new Date(f.data + 'T12:00:00');
+    var label = d.toLocaleDateString('pt-BR', {weekday:'short', day:'2-digit', month:'2-digit'});
+    var dif = +f.diferenca || 0;
+    return '<div class="li" style="margin-bottom:6px;">' +
+      '<div class="li-info">' +
+        '<div class="li-title" style="font-size:12px;">' + label + '</div>' +
+        '<div class="li-sub">Em maos: ' + fmt(+f.valor_em_maos) + ' | CF: ' + fmt(+f.caixa_fixo) + '</div>' +
+      '</div>' +
+      '<div style="text-align:right;">' +
+        '<div style="font-size:11px;font-weight:700;color:' + (Math.abs(dif)<0.01?'var(--green)':dif>0?'var(--green)':'var(--red)') + ';">' + fmtS(dif) + '</div>' +
+        '<div style="font-size:9px;color:var(--text3);">diferenca</div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
 }
 
 function renderFechamentoInline() {
@@ -1352,9 +1469,9 @@ async function salvarLanc() {
       // Salvar descricao do outros no obs do lancamento
       await sb('lancamentos?id=eq.' + (ex ? ex.id : ''), {method:'PATCH', body:JSON.stringify({obs: outrosDesc + ': R$ ' + outrosVal.toFixed(2)})}).catch(function(){});
     }
-    // Atualizar caixa fixo se informado
+    // Atualizar caixa fixo e fechar caixa do dia
     var cfVal = parseFloat(document.getElementById('lancCaixaFixo') ? document.getElementById('lancCaixaFixo').value : 0) || 0;
-    if (cfVal > 0 && cfVal !== caixaFixoAtual.valor) {
+    if (cfVal > 0) {
       var existeCf = await sb('caixa_fixo?data=eq.' + data + '&user_id=eq.' + userId);
       if (existeCf && existeCf.length > 0) {
         await sb('caixa_fixo?data=eq.' + data + '&user_id=eq.' + userId, {method:'PATCH', body:JSON.stringify({valor:cfVal})});
@@ -1362,6 +1479,11 @@ async function salvarLanc() {
         await sb('caixa_fixo', {method:'POST', body:JSON.stringify({valor:cfVal, data:data, user_id:userId, obs:'Fechamento diario'})});
       }
       caixaFixoAtual = {valor:cfVal, data:data};
+    }
+    // Fechar caixa do dia se for hoje
+    if (data === hoje() && caixaAberto) {
+      await sb('abertura_caixa?user_id=eq.' + userId + '&data=eq.' + data, {method:'PATCH', body:JSON.stringify({status:'fechado'})}).catch(function(){});
+      caixaAberto = null;
     }
     showMsg('lancMsg', 'Salvo!', 'ok');
     await carregarDados();
@@ -1764,6 +1886,7 @@ async function excluirFornecedor(id) {
   await sb('fornecedores?id=eq.' + id, {method:'DELETE'});
   fornecedores = fornecedores.filter(function(f) { return f.id !== id; });
   renderAll();
+  verificarAberturaCaixa();
 }
 
 async function excluirDesp(idx, descNome) {
