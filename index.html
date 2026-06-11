@@ -928,7 +928,7 @@ function renderPDV() {
         '<div class="pdv-item-sub">' + fmt(item.preco * item.qtd) + '</div></div>';
     }).join('');
     carrinhoHtml += '<div class="pdv-total"><span class="pdv-total-label">Total</span><span class="pdv-total-val">' + fmt(totalCarrinho) + '</span></div></div>';
-    carrinhoHtml += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;"><button class="btn btn-outline" onclick="limparCarrinho()">Limpar</button><button class="btn btn-primary" onclick="abrirPagamento()">Finalizar</button></div>';
+    carrinhoHtml += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;"><button class="btn btn-danger-sm" style="width:100%;padding:11px;font-size:12px;" onclick="limparCarrinho()">✕ Cancelar</button><button class="btn btn-primary" onclick="abrirPagamento()">✓ Finalizar</button></div>';
   }
   var vendasHoje = vendas.filter(function(v) { return v.data === hoje(); });
   var vendasHtml = vendasHoje.length === 0 ? '<div class="empty">Nenhuma venda hoje.</div>' : vendasHoje.map(function(v) {
@@ -975,7 +975,8 @@ function alterarQtdCarrinho(idx, delta) {
 }
 
 function limparCarrinho() {
-  if (!confirm('Limpar carrinho?')) return;
+  if (carrinho.length === 0) return;
+  if (!confirm('Cancelar a venda e limpar o carrinho?')) return;
   carrinho = []; renderPDV();
 }
 
