@@ -932,7 +932,16 @@ function renderPDV() {
   }
   var vendasHoje = vendas.filter(function(v) { return v.data === hoje(); });
   var vendasHtml = vendasHoje.length === 0 ? '<div class="empty">Nenhuma venda hoje.</div>' : vendasHoje.map(function(v) {
-    return '<div class="li" onclick="verVenda(&quot;' + v.id + '&quot;)" style="cursor:pointer;"><div class="li-info"><div class="li-title">' + fmt(v.total_final) + '</div><div class="li-sub">' + new Date(v.created_at).toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'}) + ' - ' + v.forma_pagamento + '</div></div><span class="badge bg-green">ok</span></div>';
+    var hora = new Date(v.created_at).toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
+    return '<div class="li"><div class="li-info" onclick="verVenda(&quot;' + v.id + '&quot;)" style="cursor:pointer;flex:1;"><div class="li-title">' + fmt(v.total_final) + '</div><div class="li-sub">' + hora + ' - ' + v.forma_pagamento + (v.obs?' - '+v.obs:'') + '</div></div>' +
+      '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">' +
+        '<span class="badge bg-green">ok</span>' +
+        '<div style="display:flex;gap:4px;">' +
+          '<button class="btn btn-sm btn-yellow-sm" onclick="editarVenda(&quot;' + v.id + '&quot;)">editar</button>' +
+          '<button class="btn btn-sm btn-danger-sm" onclick="cancelarVenda(&quot;' + v.id + '&quot;)">cancelar</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
   }).join('');
   document.getElementById('page-pdv').innerHTML =
     '<div class="sec">Frente de Caixa</div>' +
@@ -1019,6 +1028,63 @@ async function finalizarVenda() {
     showMsg('msgPdv', 'Venda registrada!', 'ok');
     setTimeout(function() { fecharMo('moPdvPagamento'); carrinho = []; renderAll(); }, 800);
   } catch(e) { showMsg('msgPdv', 'Erro: ' + e.message, 'err'); }
+}
+
+async function cancelarVenda(id) {
+  if (!confirm('Cancelar esta venda? O estoque sera devolvido automaticamente.')) return;
+  try {
+    // Buscar itens da venda para devolver estoque
+    var itens = await sb('venda_itens?venda_id=eq.' + id + '&order=created_at.asc');
+    for (var i = 0; i < itens.length; i++) {
+      var item = itens[i];
+      var prod = produtos.find(function(p) { return p.id === item.produto_id; });
+      if (prod) {
+        var novoEst = (+prod.estoque_atual || 0) + (+item.quantidade || 0);
+        await sb('produtos?id=eq.' + item.produto_id, {method:'PATCH', body:JSON.stringify({estoque_atual:novoEst, updated_at:new Date().toISOString()})});
+        prod.estoque_atual = novoEst;
+      }
+    }
+    // Deletar itens e venda
+    await sb('venda_itens?venda_id=eq.' + id, {method:'DELETE'});
+    await sb('vendas?id=eq.' + id, {method:'DELETE'});
+    vendas = vendas.filter(function(v) { return v.id !== id; });
+    renderAll();
+  } catch(e) { alert('Erro ao cancelar: ' + e.message); }
+}
+
+async function editarVenda(id) {
+  var v = vendas.find(function(x) { return x.id === id; });
+  if (!v) return;
+  try {
+    var itens = await sb('venda_itens?venda_id=eq.' + id + '&order=created_at.asc');
+    // Restaurar carrinho com os itens da venda
+    carrinho = itens.map(function(i) {
+      return {
+        prodId: i.produto_id,
+        nome: i.nome_produto,
+        preco: +i.preco_unitario,
+        unidade: 'un',
+        qtd: +i.quantidade,
+        custoUnit: +i.preco_custo || 0
+      };
+    });
+    // Cancelar a venda original (devolver estoque)
+    for (var j = 0; j < itens.length; j++) {
+      var item = itens[j];
+      var prod = produtos.find(function(p) { return p.id === item.produto_id; });
+      if (prod) {
+        var novoEst = (+prod.estoque_atual || 0) + (+item.quantidade || 0);
+        await sb('produtos?id=eq.' + item.produto_id, {method:'PATCH', body:JSON.stringify({estoque_atual:novoEst})});
+        prod.estoque_atual = novoEst;
+      }
+    }
+    await sb('venda_itens?venda_id=eq.' + id, {method:'DELETE'});
+    await sb('vendas?id=eq.' + id, {method:'DELETE'});
+    vendas = vendas.filter(function(x) { return x.id !== id; });
+    // Abrir modal de pagamento com carrinho restaurado
+    renderPDV();
+    abrirPagamento();
+  } catch(e) { alert('Erro ao editar: ' + e.message); }
 }
 
 async function verVenda(id) {
