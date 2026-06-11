@@ -515,16 +515,8 @@ async function confirmarAbertura() {
     var res = await sb('abertura_caixa', {method:'POST', headers:{'Prefer':'return=representation'}, body:JSON.stringify({
       user_id:userId, data:hoje(), mes_ano:MES_ANO, caixa_fixo:cf, status:'aberto'
     })});
-    // Atualizar caixa fixo
-    if (cf > 0) {
-      var existeCf = await sb('caixa_fixo?data=eq.' + hoje() + '&user_id=eq.' + userId);
-      if (existeCf && existeCf.length > 0) {
-        await sb('caixa_fixo?data=eq.' + hoje() + '&user_id=eq.' + userId, {method:'PATCH', body:JSON.stringify({valor:cf})});
-      } else {
-        await sb('caixa_fixo', {method:'POST', body:JSON.stringify({valor:cf, data:hoje(), user_id:userId, obs:'Abertura de caixa'})});
-      }
-      caixaFixoAtual = {valor:cf, data:hoje()};
-    }
+    // NÃO atualiza o caixa fixo na abertura - apenas registra para referência
+    // O caixa fixo só é atualizado no FECHAMENTO
     caixaAberto = Array.isArray(res) ? res[0] : res;
     if (Array.isArray(aberturas)) aberturas.unshift(caixaAberto);
     showMsg('abertMsg', 'Caixa aberto!', 'ok');
@@ -951,8 +943,99 @@ function renderPDV() {
     carrinhoHtml +
     '<div class="divider"></div>' +
     '<div class="sec">Vendas de hoje</div>' +
-    vendasHtml;
+    vendasHtml +
+    '<div class="divider"></div>' +
+    renderFechamentoPDV();
   filtrarProdutosPDV();
+}
+
+function renderFechamentoPDV() {
+  var fechHoje = fechamentos.find(function(f) { return f.data === hoje(); });
+  if (fechHoje) {
+    return '<div style="background:var(--green-bg);border:1px solid var(--green2);border-radius:var(--r);padding:12px;">' +
+      '<div style="font-size:12px;font-weight:700;color:var(--green);margin-bottom:4px;">✓ Caixa fechado hoje</div>' +
+      '<div style="font-size:11px;color:var(--text2);">Em maos: ' + fmt(+fechHoje.valor_em_maos) + ' | CF: ' + fmt(+fechHoje.caixa_fixo) + ' | Diferenca: ' + fmtS(+fechHoje.diferenca) + '</div>' +
+    '</div>';
+  }
+  if (!caixaAberto) {
+    return '<div class="alert alert-yellow">Abra o caixa primeiro para registrar vendas.</div>';
+  }
+  var t = calcTotais();
+  var vendasHoje = vendas.filter(function(v) { return v.data === hoje(); });
+  var lancHoje = lancamentos.find(function(l) { return l.data === hoje(); });
+  var totalDia = vendasHoje.reduce(function(a,v){return a+(+v.total_final||0);},0) +
+    (lancHoje ? (+lancHoje.dinheiro||0)+(+lancHoje.pix||0)+(+lancHoje.debito||0)+(+lancHoje.credito||0) : 0);
+  var saidasHoje = saidas.filter(function(s){return s.data===hoje();}).reduce(function(a,s){return a+(+s.valor||0);},0);
+
+  return '<div style="background:var(--bg2);border:1px solid #5b21b6;border-radius:var(--r);overflow:hidden;">' +
+    '<div style="background:var(--purple-bg);padding:10px 14px;border-bottom:1px solid #5b21b6;">' +
+      '<div style="font-family:Syne,sans-serif;font-size:12px;font-weight:700;color:var(--purple);">Fechar Caixa — ' + hoje() + '</div>' +
+    '</div>' +
+    '<div style="padding:10px 14px;">' +
+      '<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;"><span style="color:var(--text3);">Abertura (caixa fixo)</span><span>' + fmt(caixaFixoAtual.valor) + '</span></div>' +
+      '<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;"><span style="color:var(--text3);">Total entradas do dia</span><span style="color:var(--green);">' + fmt(totalDia) + '</span></div>' +
+      (saidasHoje>0?'<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;"><span style="color:var(--text3);">Saidas do dia</span><span style="color:var(--red);">- ' + fmt(saidasHoje) + '</span></div>':'') +
+      '<div style="display:flex;justify-content:space-between;font-size:13px;font-weight:700;padding:6px 0;border-top:1px solid var(--border);margin-top:4px;"><span>Saldo esperado</span><span style="color:var(--green);">' + fmt(caixaFixoAtual.valor + totalDia - saidasHoje) + '</span></div>' +
+      '<div class="field" style="margin-top:8px;"><label>Dinheiro fisico em maos</label><input type="number" id="pdvFechDin" placeholder="0.00" step="0.01" inputmode="decimal" oninput="calcDifPDV()"></div>' +
+      '<div class="field"><label>Caixa fixo (fundo de troco)</label><input type="number" id="pdvFechCf" value="' + (caixaFixoAtual.valor||'') + '" step="0.01" inputmode="decimal" oninput="calcDifPDV()"></div>' +
+      '<div id="pdvDifDiv" style="display:none;padding:8px;border-radius:var(--rsm);margin-bottom:8px;"></div>' +
+      '<div class="msg" id="pdvFechMsg"></div>' +
+      '<button class="btn btn-primary" onclick="fecharCaixaPDV()">🔒 Fechar Caixa</button>' +
+    '</div>' +
+  '</div>';
+}
+
+function calcDifPDV() {
+  var din = parseFloat(document.getElementById('pdvFechDin')?document.getElementById('pdvFechDin').value:0)||0;
+  var cf = parseFloat(document.getElementById('pdvFechCf')?document.getElementById('pdvFechCf').value:0)||0;
+  if (din+cf<=0) { var el=document.getElementById('pdvDifDiv'); if(el) el.style.display='none'; return; }
+  var vendasHoje = vendas.filter(function(v){return v.data===hoje();});
+  var lancHoje = lancamentos.find(function(l){return l.data===hoje();});
+  var digital = vendasHoje.filter(function(v){return v.forma_pagamento!=='dinheiro';}).reduce(function(a,v){return a+(+v.total_final||0);},0) +
+    (lancHoje?(+lancHoje.pix||0)+(+lancHoje.debito||0)+(+lancHoje.credito||0):0);
+  var totalInf = din + cf + digital;
+  var t = calcTotais();
+  var dif = totalInf - t.saldoTotal;
+  var el = document.getElementById('pdvDifDiv');
+  if (!el) return;
+  el.style.display='block';
+  el.style.background = Math.abs(dif)<0.01?'var(--green-bg)':'var(--yellow-bg)';
+  el.style.border = '1px solid '+(Math.abs(dif)<0.01?'var(--green2)':'#854d0e');
+  el.innerHTML = '<span style="font-size:12px;font-weight:700;color:'+(Math.abs(dif)<0.01?'var(--green)':dif>0?'var(--green)':'var(--red)')+';">'+(Math.abs(dif)<0.01?'✓ Caixa correto!':'Diferenca: '+fmtS(dif))+'</span>';
+}
+
+async function fecharCaixaPDV() {
+  var din = parseFloat(document.getElementById('pdvFechDin')?document.getElementById('pdvFechDin').value:0)||0;
+  var cf = parseFloat(document.getElementById('pdvFechCf')?document.getElementById('pdvFechCf').value:0)||0;
+  if (din<=0) { showMsg('pdvFechMsg','Informe o dinheiro em maos.','err'); return; }
+  var vendasHoje = vendas.filter(function(v){return v.data===hoje();});
+  var lancHoje = lancamentos.find(function(l){return l.data===hoje();});
+  var digital = vendasHoje.filter(function(v){return v.forma_pagamento!=='dinheiro';}).reduce(function(a,v){return a+(+v.total_final||0);},0) +
+    (lancHoje?(+lancHoje.pix||0)+(+lancHoje.debito||0)+(+lancHoje.credito||0):0);
+  var totalEmMaos = din + digital;
+  var t = calcTotais();
+  var dif = (totalEmMaos + cf) - t.saldoTotal;
+  showMsg('pdvFechMsg','Fechando...','warn');
+  try {
+    await sb('fechamento_caixa',{method:'POST',headers:{'Prefer':'resolution=merge-duplicates,return=representation'},body:JSON.stringify({
+      user_id:userId,data:hoje(),mes_ano:MES_ANO,valor_em_maos:totalEmMaos,caixa_fixo:cf,valor_conta:digital,saldo_sistema:t.saldoTotal,diferenca:dif,obs:'Fechamento PDV'
+    })});
+    if (cf!==caixaFixoAtual.valor) {
+      var existeCf=await sb('caixa_fixo?data=eq.'+hoje()+'&user_id=eq.'+userId);
+      if(existeCf&&existeCf.length>0){await sb('caixa_fixo?data=eq.'+hoje()+'&user_id=eq.'+userId,{method:'PATCH',body:JSON.stringify({valor:cf})});}
+      else{await sb('caixa_fixo',{method:'POST',body:JSON.stringify({valor:cf,data:hoje(),user_id:userId,obs:'Fechamento PDV'})});}
+      caixaFixoAtual={valor:cf,data:hoje()};
+    }
+    if(Math.abs(dif)>=0.01){
+      var novoSI=saldoInicial.valor+dif;
+      await sb('configuracoes?chave=eq.saldo_inicial&user_id=eq.'+userId,{method:'PATCH',body:JSON.stringify({valor:JSON.stringify({valor:novoSI,data:saldoInicial.data,obs:saldoInicial.obs})})});
+      saldoInicial.valor=novoSI;
+    }
+    await sb('abertura_caixa?user_id=eq.'+userId+'&data=eq.'+hoje(),{method:'PATCH',body:JSON.stringify({status:'fechado'})}).catch(function(){});
+    caixaAberto=null;
+    showMsg('pdvFechMsg','Caixa fechado!','ok');
+    setTimeout(function(){carregarDados();},800);
+  } catch(e){showMsg('pdvFechMsg','Erro: '+e.message,'err');}
 }
 
 function filtrarProdutosPDV() {
