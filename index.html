@@ -392,11 +392,78 @@ async function sb(path, opts) {
   if (token) hdrs['Authorization'] = 'Bearer ' + token;
   Object.assign(hdrs, opts.headers || {});
   const r = await fetch(SB + '/rest/v1/' + path, Object.assign({}, opts, {headers:hdrs}));
+  // Token expirado - tentar renovar automaticamente
+  if (r.status === 401) {
+    var renovado = await renovarToken();
+    if (renovado) {
+      hdrs['Authorization'] = 'Bearer ' + token;
+      const r2 = await fetch(SB + '/rest/v1/' + path, Object.assign({}, opts, {headers:hdrs}));
+      const t2 = await r2.text();
+      if (!t2) return [];
+      const p2 = JSON.parse(t2);
+      if (p2 && !Array.isArray(p2) && p2.code) throw new Error(p2.message || 'Erro Supabase');
+      return Array.isArray(p2) ? p2 : p2;
+    } else {
+      mostrarErroSessao();
+      throw new Error('Sessao expirada');
+    }
+  }
   const t = await r.text();
   if (!t) return [];
   const p = JSON.parse(t);
   if (p && !Array.isArray(p) && p.code) throw new Error(p.message || 'Erro Supabase');
   return Array.isArray(p) ? p : p;
+}
+
+async function renovarToken() {
+  try {
+    var refreshToken = localStorage.getItem('fc_refresh_token');
+    if (!refreshToken) return false;
+    var res = await fetch(SB + '/auth/v1/token?grant_type=refresh_token', {
+      method: 'POST',
+      headers: {'apikey': KEY, 'Content-Type': 'application/json'},
+      body: JSON.stringify({refresh_token: refreshToken})
+    });
+    if (!res.ok) return false;
+    var data = await res.json();
+    if (data.access_token) {
+      token = data.access_token;
+      localStorage.setItem('fc_token', token);
+      if (data.refresh_token) localStorage.setItem('fc_refresh_token', data.refresh_token);
+      return true;
+    }
+    return false;
+  } catch(e) { return false; }
+}
+
+function mostrarErroSessao() {
+  var div = document.getElementById('sessaoExpiradaModal');
+  if (!div) {
+    div = document.createElement('div');
+    div.id = 'sessaoExpiradaModal';
+    div.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:9999;display:flex;align-items:center;justify-content:center;';
+    div.innerHTML = '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:24px;max-width:320px;width:90%;text-align:center;">' +
+      '<div style="font-size:32px;margin-bottom:12px;">⏱️</div>' +
+      '<div style="font-family:Syne,sans-serif;font-size:16px;font-weight:700;margin-bottom:8px;">Sessao expirada</div>' +
+      '<div style="font-size:12px;color:var(--text3);margin-bottom:16px;">Sua sessao expirou por inatividade. Clique abaixo para reconectar sem perder o que estava fazendo.</div>' +
+      '<button class="btn btn-primary" onclick="reconectarSessao()" style="width:100%;margin-bottom:8px;">🔄 Reconectar</button>' +
+      '<button class="btn btn-outline" onclick="logout()" style="width:100%;">Sair</button>' +
+    '</div>';
+    document.body.appendChild(div);
+  }
+  div.style.display = 'flex';
+}
+
+async function reconectarSessao() {
+  var renovado = await renovarToken();
+  var modal = document.getElementById('sessaoExpiradaModal');
+  if (renovado) {
+    if (modal) modal.style.display = 'none';
+    carregarDados();
+  } else {
+    if (modal) modal.style.display = 'none';
+    logout();
+  }
 }
 
 async function login() {
@@ -407,6 +474,7 @@ async function login() {
   const r = await sbAuth('token?grant_type=password', {email:email, password:senha});
   if (!r || r.error) { showAuthMsg((r && r.error && r.error.message) || 'E-mail ou senha incorretos.', 'err'); return; }
   if (!r.access_token || !r.user) { showAuthMsg('Erro ao autenticar.', 'err'); return; }
+  localStorage.setItem('fc_refresh_token', r.refresh_token || '');
   await iniciarSessao(r.access_token, r.user);
 }
 
@@ -443,6 +511,7 @@ async function iniciarSessao(tok, user) {
   token = tok; userId = user.id;
   localStorage.setItem('fc_token', tok);
   localStorage.setItem('fc_user', JSON.stringify(user));
+  if (user.refresh_token) localStorage.setItem('fc_refresh_token', user.refresh_token);
   try {
     const ps = await sb('perfis?id=eq.' + userId);
     if (!ps || ps.length === 0) {
@@ -487,6 +556,23 @@ function mostrarApp() {
   const agora = new Date();
   document.getElementById('headerMes').textContent = agora.toLocaleDateString('pt-BR', {month:'long', year:'numeric'});
   carregarDados();
+}
+
+function verificarMesAnterior() {
+  // Verificar se virou o mês e salvar histórico automaticamente
+  var hoje = new Date();
+  var mesAtual = hoje.getFullYear() + '-' + String(hoje.getMonth()+1).padStart(2,'0');
+  var ultimoCheck = localStorage.getItem('fc_mes_check_' + userId);
+  if (ultimoCheck && ultimoCheck !== mesAtual) {
+    // Virou o mês - salvar histórico do mês anterior
+    var t = calcTotais();
+    if (t.totalFat > 0) {
+      sb('faturamento_historico', {method:'POST', headers:{'Prefer':'resolution=merge-duplicates,return=representation'}, body:JSON.stringify({
+        user_id:userId, mes_ano:ultimoCheck, total:t.totalFat
+      })}).catch(function(){});
+    }
+  }
+  localStorage.setItem('fc_mes_check_' + userId, mesAtual);
 }
 
 function verificarAberturaCaixa() {
@@ -994,6 +1080,7 @@ async function fecharCaixaPDV() {
   var din = parseFloat(document.getElementById('pdvFechDin')?document.getElementById('pdvFechDin').value:0)||0;
   var cf = parseFloat(document.getElementById('pdvFechCf')?document.getElementById('pdvFechCf').value:0)||0;
   if (din<=0) { showMsg('pdvFechMsg','Informe o dinheiro em maos.','err'); return; }
+  if (!confirm('Confirma o fechamento do caixa?\nDinheiro em maos: R$ ' + din.toFixed(2) + '\nCaixa fixo: R$ ' + cf.toFixed(2) + '\n\nEsta acao nao pode ser desfeita facilmente.')) return;
   var vendasHoje = vendas.filter(function(v){return v.data===hoje();});
   var lancHoje = lancamentos.find(function(l){return l.data===hoje();});
   var digital = vendasHoje.filter(function(v){return v.forma_pagamento!=='dinheiro';}).reduce(function(a,v){return a+(+v.total_final||0);},0) +
@@ -1423,6 +1510,107 @@ function buildCharts() {
   });
   fa[mi] = calcTotais().totalFat; // mes atual sempre do banco
   charts.anual = new Chart(document.getElementById('cAnual'), {type:'bar', data:{labels:['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'], datasets:[{data:fa, backgroundColor:fa.map(function(v,i) { return i===mi?'rgba(74,222,128,0.8)':i<mi?'rgba(96,165,250,0.5)':'rgba(255,255,255,0.06)'; }), borderRadius:4}, {label:'Meta', data:Array(12).fill(perfil.meta_mensal||9500), type:'line', borderColor:'rgba(251,191,36,0.5)', borderDash:[5,4], borderWidth:1.5, pointRadius:0, fill:false}]}, options:Object.assign({}, co, {plugins:{legend:{display:false}, tooltip:{callbacks:{label:function(ctx) { return fmt(ctx.raw); }}}}})});
+}
+
+function renderRelatorioDespesas() {
+  var t = calcTotais();
+  var desp = getDespesas();
+  var totalPrevisto = desp.reduce(function(a,d){return a+d.val;},0);
+  var totalPago = desp.filter(function(d){return pagamentos[d.dia+'-'+d.desc];}).reduce(function(a,d){return a+d.val;},0);
+  var totalPendente = totalPrevisto - totalPago;
+  var pct = totalPrevisto > 0 ? Math.round(totalPago/totalPrevisto*100) : 0;
+  var pctFat = t.totalFat > 0 ? Math.round(totalPrevisto/t.totalFat*100) : 0;
+
+  var html = '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:10px;">' +
+    '<div style="padding:12px 14px;background:var(--bg3);border-bottom:1px solid var(--border);">' +
+      '<div style="font-family:Syne,sans-serif;font-size:12px;font-weight:700;margin-bottom:8px;">Despesas — ' + MES_ANO + '</div>' +
+      '<div style="display:flex;gap:4px;height:6px;border-radius:3px;overflow:hidden;margin-bottom:8px;">' +
+        '<div style="width:' + pct + '%;background:var(--green);transition:width 0.3s;"></div>' +
+        '<div style="flex:1;background:var(--border2);"></div>' +
+      '</div>' +
+      '<div style="display:flex;justify-content:space-between;font-size:11px;">' +
+        '<span style="color:var(--green);">Pago: ' + fmt(totalPago) + '</span>' +
+        '<span style="color:var(--yellow);">Pendente: ' + fmt(totalPendente) + '</span>' +
+        '<span style="color:var(--text3);">' + pct + '% quitado</span>' +
+      '</div>' +
+    '</div>' +
+    '<div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;font-size:11px;">' +
+      '<span style="color:var(--text3);">Total previsto</span><span style="font-weight:600;">' + fmt(totalPrevisto) + '</span>' +
+    '</div>' +
+    '<div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;font-size:11px;">' +
+      '<span style="color:var(--text3);">% do faturamento</span><span style="font-weight:600;color:' + (pctFat>80?'var(--red)':pctFat>60?'var(--yellow)':'var(--green)') + ';">' + pctFat + '%</span>' +
+    '</div>' +
+    '<div style="padding:8px 14px;">';
+
+  // Listar despesas por categoria
+  var cats = {};
+  desp.forEach(function(d) {
+    if (!cats[d.cat]) cats[d.cat] = {total:0, pago:0};
+    cats[d.cat].total += d.val;
+    if (pagamentos[d.dia+'-'+d.desc]) cats[d.cat].pago += d.val;
+  });
+
+  Object.keys(cats).sort().forEach(function(cat) {
+    var c = cats[cat];
+    var cpct = c.total > 0 ? Math.round(c.pago/c.total*100) : 0;
+    html += '<div style="display:flex;justify-content:space-between;font-size:11px;padding:4px 0;border-bottom:1px solid var(--border);">' +
+      '<span style="color:var(--text3);">' + cat + '</span>' +
+      '<span>' + fmt(c.pago) + ' / ' + fmt(c.total) + ' <span style="color:' + (cpct===100?'var(--green)':'var(--text3)') + ';font-size:10px;">(' + cpct + '%)</span></span>' +
+    '</div>';
+  });
+
+  html += '</div></div>';
+  return html;
+}
+
+function exportarCSV() {
+  var linhas = [['Tipo','Data','Descricao','Dinheiro','Pix','Debito','Credito','Total','Forma Pagamento']];
+
+  // Lançamentos manuais
+  lancamentos.forEach(function(l) {
+    var total = (+l.dinheiro||0)+(+l.pix||0)+(+l.debito||0)+(+l.credito||0);
+    linhas.push(['Lancamento manual', l.data, 'Entrada do dia', +l.dinheiro||0, +l.pix||0, +l.debito||0, +l.credito||0, total, '']);
+  });
+
+  // Vendas PDV
+  vendas.forEach(function(v) {
+    linhas.push(['Venda PDV', v.data || v.created_at.split('T')[0], v.obs||'Venda PDV', '', '', '', '', +v.total_final||0, v.forma_pagamento]);
+  });
+
+  // Saídas
+  saidas.forEach(function(s) {
+    linhas.push(['Saida', s.data, s.descricao, '', '', '', '', -(+s.valor||0), s.categoria]);
+  });
+
+  // Reinvestimentos
+  reinvestimentos.forEach(function(r) {
+    linhas.push(['Reinvestimento', r.data, r.descricao||r.tipo, '', '', '', '', -(+r.valor||0), r.tipo]);
+  });
+
+  // Despesas pagas
+  getDespesas().forEach(function(d) {
+    if (pagamentos[d.dia+'-'+d.desc]) {
+      linhas.push(['Despesa paga', MES_ANO+'-'+String(d.dia).padStart(2,'0'), d.desc, '', '', '', '', -(+d.val||0), d.cat]);
+    }
+  });
+
+  // Aportes
+  aportes.forEach(function(a) {
+    linhas.push(['Aporte pessoal', a.data, a.descricao||'Aporte', '', '', '', '', +a.valor||0, '']);
+  });
+
+  var csv = linhas.map(function(r) {
+    return r.map(function(c) {
+      var s = String(c).replace(/"/g, '""');
+      return s.indexOf(',') >= 0 || s.indexOf('"') >= 0 ? '"' + s + '"' : s;
+    }).join(',');
+  }).join('\n');
+
+  var blob = new Blob(['\uFEFF' + csv], {type:'text/csv;charset=utf-8;'});
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'FluxoCerto_' + MES_ANO + '.csv';
+  a.click();
 }
 
 function renderConfig() {
@@ -2024,6 +2212,7 @@ async function excluirFornecedor(id) {
   await sb('fornecedores?id=eq.' + id, {method:'DELETE'});
   fornecedores = fornecedores.filter(function(f) { return f.id !== id; });
   renderAll();
+  verificarMesAnterior();
   verificarAberturaCaixa();
 }
 
