@@ -570,33 +570,7 @@ let carrinho = [];
 let editProdId = null, ajusteEstoqueProdId = null;
 let charts = {};
 
-const DESPESAS_PADRAO = [
-  {dia:1, desc:'Plano de Saude Familia', val:923.60, cat:'Loja', sem:1},
-  {dia:1, desc:'Energia Loja', val:140.00, cat:'Loja', sem:1},
-  {dia:7, desc:'Cartao MP Maquina 3/12', val:160.20, cat:'Loja', sem:1},
-  {dia:7, desc:'Cartao MP Maquina parc.', val:124.74, cat:'Loja', sem:1},
-  {dia:7, desc:'Cartao MP Acessorio Carro', val:16.70, cat:'Loja', sem:1},
-  {dia:7, desc:'Cartao MP Impressora', val:67.84, cat:'Loja', sem:1},
-  {dia:9, desc:'Aluguel Topzera', val:1621.00, cat:'Loja', sem:2},
-  {dia:9, desc:'Internet Loja', val:109.90, cat:'Loja', sem:2},
-  {dia:9, desc:'Internet Pessoal', val:100.00, cat:'Pessoal', sem:2},
-  {dia:10, desc:'DAS CNPJ', val:87.05, cat:'Loja', sem:2},
-  {dia:10, desc:'Agua Pessoal', val:100.00, cat:'Pessoal', sem:2},
-  {dia:10, desc:'Cabelo', val:66.00, cat:'Pessoal', sem:2},
-  {dia:10, desc:'Dizimo', val:200.00, cat:'Pessoal', sem:2},
-  {dia:10, desc:'Energia Pessoal', val:140.00, cat:'Pessoal', sem:2},
-  {dia:10, desc:'Investimento Pessoal', val:60.00, cat:'Pessoal', sem:2},
-  {dia:10, desc:'Oferta', val:50.00, cat:'Pessoal', sem:2},
-  {dia:10, desc:'Pacto Desb.', val:30.00, cat:'Pessoal', sem:2},
-  {dia:10, desc:'Transporte B', val:220.00, cat:'Pessoal', sem:2},
-  {dia:15, desc:'Contabilidade MPS', val:300.00, cat:'Loja', sem:3},
-  {dia:15, desc:'Folha CNPJ MPS', val:184.06, cat:'Loja', sem:3},
-  {dia:20, desc:'Cartao Nubank Loja', val:118.54, cat:'Loja', sem:3},
-  {dia:25, desc:'Agua Loja', val:136.23, cat:'Loja', sem:4},
-  {dia:25, desc:'Celular Loja', val:385.00, cat:'Loja', sem:4},
-  {dia:25, desc:'Sistema Loja', val:169.00, cat:'Loja', sem:4},
-  {dia:25, desc:'Cartao Nubank Pessoal', val:595.10, cat:'Pessoal', sem:4}
-];
+const DESPESAS_PADRAO = []; // Despesas agora vem do banco (tabela despesas_fixas)
 
 const SEMANAS = [
   {num:1, label:'Semana 1', periodo:'01 a 07', dias:[1,2,3,4,5,6,7]},
@@ -706,6 +680,11 @@ function calcTotais() {
   var fatDinheiro = lancamentos.reduce(function(a, l) { return a + (+l.dinheiro || 0); }, 0);
   var fatConta = lancamentos.reduce(function(a, l) { return a + (+l.pix || 0) + (+l.debito || 0) + (+l.credito || 0); }, 0);
   var fatPDV = vendas.reduce(function(a, v) { return a + (+v.total_final || 0); }, 0);
+  var pdvDinheiro = vendas.filter(function(v){return v.forma_pagamento==='dinheiro';}).reduce(function(a,v){return a+(+v.total_final||0);},0);
+  var pdvPix = vendas.filter(function(v){return v.forma_pagamento==='pix';}).reduce(function(a,v){return a+(+v.total_final||0);},0);
+  var pdvDebito = vendas.filter(function(v){return v.forma_pagamento==='debito';}).reduce(function(a,v){return a+(+v.total_final||0);},0);
+  var pdvCredito = vendas.filter(function(v){return v.forma_pagamento==='credito';}).reduce(function(a,v){return a+(+v.total_final||0);},0);
+  var pdvOutros = vendas.filter(function(v){return v.forma_pagamento==='outros'||v.forma_pagamento==='misto';}).reduce(function(a,v){return a+(+v.total_final||0);},0);
   var fatPDVDinheiro = vendas.filter(function(v){return v.forma_pagamento==='dinheiro';}).reduce(function(a,v){return a+(+v.total_final||0);},0);
   var fatPDVConta = vendas.filter(function(v){return v.forma_pagamento!=='dinheiro';}).reduce(function(a,v){return a+(+v.total_final||0);},0);
   var totalDinheiro = fatDinheiro + fatPDVDinheiro;
@@ -721,7 +700,7 @@ function calcTotais() {
   var saldoConta = saldoInicial.valor + totalLiquido + fatPlat + totalAportes - totalDespPagas - totalSaidas;
   var saldoTotal = saldoConta + caixaFixoAtual.valor;
   var metaMes = perfil.meta_mensal || 9500;
-  return {fatVendas:fatVendas, fatPDV:fatPDV, fatDinheiro:fatDinheiro, fatConta:fatConta, totalDinheiro:totalDinheiro, totalConta:totalConta, totalAportes:totalAportes, fatPlat:fatPlat, totalFat:totalFat, totalReinvest:totalReinvest, totalReinvestUsado:totalReinvestUsado, totalLiquido:totalLiquido, totalDespPagas:totalDespPagas, totalSaidas:totalSaidas, saldoConta:saldoConta, saldoTotal:saldoTotal, metaMes:metaMes};
+  return {fatVendas:fatVendas, fatPDV:fatPDV, pdvDinheiro:pdvDinheiro, pdvPix:pdvPix, pdvDebito:pdvDebito, pdvCredito:pdvCredito, pdvOutros:pdvOutros, fatDinheiro:fatDinheiro, fatConta:fatConta, totalDinheiro:totalDinheiro, totalConta:totalConta, totalAportes:totalAportes, fatPlat:fatPlat, totalFat:totalFat, totalReinvest:totalReinvest, totalReinvestUsado:totalReinvestUsado, totalLiquido:totalLiquido, totalDespPagas:totalDespPagas, totalSaidas:totalSaidas, saldoConta:saldoConta, saldoTotal:saldoTotal, metaMes:metaMes};
 }
 
 function fatHoje() {
@@ -864,6 +843,11 @@ function renderDashboard() {
   var resumoRows = [
     ['Saldo inicial (' + saldoInicial.data + ')', fmt(saldoInicial.valor), 'var(--text2)'],
       ['Vendas PDV', fmt(t.fatPDV), 'var(--green)'],
+    (t.pdvDinheiro > 0 ? ['  ↳ Dinheiro', fmt(t.pdvDinheiro), 'var(--green)'] : null),
+    (t.pdvPix > 0 ? ['  ↳ Pix', fmt(t.pdvPix), 'var(--green)'] : null),
+    (t.pdvDebito > 0 ? ['  ↳ Debito', fmt(t.pdvDebito), 'var(--green)'] : null),
+    (t.pdvCredito > 0 ? ['  ↳ Credito', fmt(t.pdvCredito), 'var(--green)'] : null),
+    (t.pdvOutros > 0 ? ['  ↳ Outros', fmt(t.pdvOutros), 'var(--green)'] : null),
     ['Entradas manuais', fmt(t.fatVendas), 'var(--green)'],
     ['Receitas externas', fmt(t.fatPlat), 'var(--green)'],
     ['Aportes pessoais', fmt(t.totalAportes), 'var(--blue)'],
@@ -873,8 +857,10 @@ function renderDashboard() {
     ['Saidas', '- ' + fmt(t.totalSaidas), 'var(--red)'],
     ['Saldo conta', fmtS(t.saldoConta), t.saldoConta >= 0 ? 'var(--green)' : 'var(--red)']
   ];
+  resumoRows = resumoRows.filter(function(r) { return r !== null; });
   var resumoHtml = resumoRows.map(function(r, i) {
-    return '<div style="display:flex;justify-content:space-between;font-size:11px;padding:5px 0;' + (i > 0 ? 'border-top:1px solid var(--border)' : '') + (i >= 6 ? ';font-weight:600' : '') + '"><span style="color:var(--text3);">' + r[0] + '</span><span style="color:' + r[2] + ';">' + r[1] + '</span></div>';
+    var isSubitem = r[0].indexOf('↳') >= 0;
+    return '<div style="display:flex;justify-content:space-between;font-size:' + (isSubitem?'10px':'11px') + ';padding:' + (isSubitem?'2px 0 2px 12px':'5px 0') + ';' + (i > 0 ? 'border-top:1px solid var(--border)' : '') + '"><span style="color:' + (isSubitem?'var(--text3)':'var(--text3)') + ';">' + r[0] + '</span><span style="color:' + r[2] + ';opacity:' + (isSubitem?'0.8':'1') + ';">' + r[1] + '</span></div>';
   }).join('');
   var proximasHtml = proximas.map(function(d) {
     var atrasada = d.dia > 0 && d.dia < diaAtual;
@@ -1026,11 +1012,7 @@ async function fecharCaixaPDV() {
       else{await sb('caixa_fixo',{method:'POST',body:JSON.stringify({valor:cf,data:hoje(),user_id:userId,obs:'Fechamento PDV'})});}
       caixaFixoAtual={valor:cf,data:hoje()};
     }
-    if(Math.abs(dif)>=0.01){
-      var novoSI=saldoInicial.valor+dif;
-      await sb('configuracoes?chave=eq.saldo_inicial&user_id=eq.'+userId,{method:'PATCH',body:JSON.stringify({valor:JSON.stringify({valor:novoSI,data:saldoInicial.data,obs:saldoInicial.obs})})});
-      saldoInicial.valor=novoSI;
-    }
+    // Diferenca registrada apenas para controle - nao ajusta saldo automaticamente
     await sb('abertura_caixa?user_id=eq.'+userId+'&data=eq.'+hoje(),{method:'PATCH',body:JSON.stringify({status:'fechado'})}).catch(function(){});
     caixaAberto=null;
     showMsg('pdvFechMsg','Caixa fechado!','ok');
@@ -1609,8 +1591,19 @@ async function salvarLanc() {
   var outrosDesc = (document.getElementById('lancOutrosDesc') ? document.getElementById('lancOutrosDesc').value.trim() : '') || 'Outros';
   var outrosVal = parseFloat(document.getElementById('lancOutrosVal') ? document.getElementById('lancOutrosVal').value : 0) || 0;
   if (din + pix + deb + cred + outrosVal <= 0) { showMsg('lancMsg', 'Informe ao menos um valor.', 'err'); return; }
-  var ex = lancamentos.find(function(l) { return l.data === data; });
-  var lanc = ex ? {id:ex.id, data:data, dinheiro:(+ex.dinheiro||0)+din, pix:(+ex.pix||0)+pix, debito:(+ex.debito||0)+deb, credito:(+ex.credito||0)+cred+outrosVal, mes_ano:MES_ANO, user_id:userId} : {data:data, dinheiro:din, pix:pix, debito:deb, credito:cred+outrosVal, mes_ano:MES_ANO, user_id:userId};
+  var editId = document.getElementById('lancData') ? document.getElementById('lancData').dataset.editId : null;
+  var ex = lancamentos.find(function(l) { return editId ? l.id === editId : l.data === data; });
+  var lanc;
+  if (ex && editId) {
+    // Modo edição: substituir valores completamente
+    lanc = {id:ex.id, data:data, dinheiro:din, pix:pix, debito:deb, credito:cred+outrosVal, mes_ano:MES_ANO, user_id:userId};
+  } else if (ex) {
+    // Mesmo dia sem edição: somar ao existente
+    lanc = {id:ex.id, data:data, dinheiro:(+ex.dinheiro||0)+din, pix:(+ex.pix||0)+pix, debito:(+ex.debito||0)+deb, credito:(+ex.credito||0)+cred+outrosVal, mes_ano:MES_ANO, user_id:userId};
+  } else {
+    // Novo lançamento
+    lanc = {data:data, dinheiro:din, pix:pix, debito:deb, credito:cred+outrosVal, mes_ano:MES_ANO, user_id:userId};
+  }
   showMsg('lancMsg', 'Salvando...', 'warn');
   try {
     await sb('lancamentos', {method:'POST', headers:{'Prefer':'resolution=merge-duplicates,return=representation'}, body:JSON.stringify(lanc)});
@@ -1837,12 +1830,7 @@ async function salvarFechamento() {
       }
       caixaFixoAtual = {valor:cf, data:hoje()};
     }
-    // Se houver diferenca, ajustar saldo inicial automaticamente
-    if (Math.abs(diferenca) >= 0.01) {
-      var novoSaldoInicial = saldoInicial.valor + diferenca;
-      await sb('configuracoes?chave=eq.saldo_inicial&user_id=eq.' + userId, {method:'PATCH', body:JSON.stringify({valor:JSON.stringify({valor:novoSaldoInicial, data:saldoInicial.data, obs:saldoInicial.obs})})});
-      saldoInicial.valor = novoSaldoInicial;
-    }
+    // Diferenca registrada apenas para controle - nao ajusta saldo automaticamente
     showMsg('fechMsg', 'Caixa fechado!', 'ok');
     setTimeout(function() { fecharMo('moFechamento'); carregarDados(); }, 800);
   } catch(e) { showMsg('fechMsg', 'Erro: ' + e.message, 'err'); }
