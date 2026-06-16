@@ -762,10 +762,10 @@ async function carregarDados() {
     fechamentos = Array.isArray(results[12]) ? results[12] : [];
     aberturas = Array.isArray(results[13]) ? results[13] : [];
     rendimentos = Array.isArray(results[14]) ? results[14] : [];
+    var configs = Array.isArray(results[15]) ? results[15] : [];
+    var cf = Array.isArray(results[16]) ? results[16] : [];
     // Verificar se tem caixa aberto hoje
     caixaAberto = aberturas.find(function(a) { return a.data === hoje() && a.status === 'aberto'; }) || null;
-    var configs = Array.isArray(results[14]) ? results[14] : [];
-    var cf = Array.isArray(results[15]) ? results[15] : [];
     var si = configs.find(function(c) { return c.chave === 'saldo_inicial'; });
     if (si) {
       try { var d = JSON.parse(si.valor); saldoInicial = {valor:+d.valor || 0, data:d.data || hoje(), obs:d.obs || ''}; }
