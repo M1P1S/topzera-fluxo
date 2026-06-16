@@ -306,6 +306,21 @@ body{font-family:"DM Mono",monospace;background:var(--bg);color:var(--text);min-
   </div>
 </div>
 
+<div class="mo" id="moRendimento">
+  <div class="mo-body">
+    <div class="mo-handle"></div>
+    <div class="mo-title">Registrar Rendimento</div>
+    <div style="font-size:11px;color:#a855f7;margin-bottom:12px;padding:8px;background:rgba(168,85,247,0.1);border:1px solid rgba(168,85,247,0.3);border-radius:6px;">Rendimento de CDB, poupanca, conta remunerada etc. Sera somado ao saldo.</div>
+    <div class="field"><label>Valor (R$)</label><input type="number" id="rendVal" placeholder="0.00" step="0.01" inputmode="decimal"></div>
+    <div class="field"><label>Data</label><input type="date" id="rendData"></div>
+    <div class="field"><label>Descricao</label><input type="text" id="rendDesc" placeholder="Ex: Rendimento CDB Nubank"></div>
+    <div class="field"><label>Conta / Banco</label><input type="text" id="rendConta" placeholder="Ex: Nubank, Inter, XP..."></div>
+    <div class="msg" id="rendMsg"></div>
+    <button class="btn btn-primary" onclick="salvarRendimento()" style="margin-bottom:8px;">Registrar</button>
+    <button class="btn btn-outline" onclick="fecharMo('moRendimento')">Cancelar</button>
+  </div>
+</div>
+
 <div class="mo" id="moAporte">
   <div class="mo-body">
     <div class="mo-handle"></div>
@@ -544,6 +559,7 @@ async function logout() {
   fechamentos = [];
   aberturas = [];
   caixaAberto = null;
+  rendimentos = [];
   localStorage.removeItem('fc_token');
   localStorage.removeItem('fc_user');
   document.getElementById('app').classList.remove('visible');
@@ -647,7 +663,7 @@ function getMesAno() {
 const MES_ANO = getMesAno();
 const REINVEST = 0.35;
 
-let lancamentos = [], pagamentos = {}, receitas = [], saidas = [], vendas = [], produtos = [], categorias = [], fornecedores = [], reinvestimentos = [], despesasFixas = [], faturamentoHistorico = [], aportes = [], fechamentos = [], aberturas = [];
+let lancamentos = [], pagamentos = {}, receitas = [], saidas = [], vendas = [], produtos = [], categorias = [], fornecedores = [], reinvestimentos = [], despesasFixas = [], faturamentoHistorico = [], aportes = [], fechamentos = [], aberturas = [], rendimentos = [];
 let caixaAberto = null; // abertura do dia atual
 let saldoInicial = {valor:0, data:new Date().toISOString().split('T')[0], obs:''};
 let caixaFixoAtual = {valor:0, data:new Date().toISOString().split('T')[0]};
@@ -707,6 +723,7 @@ async function carregarDados() {
   fechamentos = [];
   aberturas = [];
   caixaAberto = null;
+  rendimentos = [];
   despesasExtra = JSON.parse(localStorage.getItem('fc_desp_' + userId) || '[]');
   try {
     var uid = userId;
@@ -725,6 +742,7 @@ async function carregarDados() {
       sb('aportes?user_id=eq.' + uid + '&mes_ano=eq.' + MES_ANO + '&order=data.asc').catch(function() { return []; }),
       sb('fechamento_caixa?user_id=eq.' + uid + '&mes_ano=eq.' + MES_ANO + '&order=data.desc').catch(function() { return []; }),
       sb('abertura_caixa?user_id=eq.' + uid + '&mes_ano=eq.' + MES_ANO + '&order=data.desc').catch(function() { return []; }),
+      sb('rendimentos?user_id=eq.' + uid + '&mes_ano=eq.' + MES_ANO + '&order=data.desc').catch(function() { return []; }),
       sb('configuracoes?user_id=eq.' + uid).catch(function() { return []; }),
       sb('caixa_fixo?user_id=eq.' + uid + '&order=data.desc&limit=1').catch(function() { return []; })
     ]);
@@ -743,6 +761,7 @@ async function carregarDados() {
     aportes = Array.isArray(results[11]) ? results[11] : [];
     fechamentos = Array.isArray(results[12]) ? results[12] : [];
     aberturas = Array.isArray(results[13]) ? results[13] : [];
+    rendimentos = Array.isArray(results[14]) ? results[14] : [];
     // Verificar se tem caixa aberto hoje
     caixaAberto = aberturas.find(function(a) { return a.data === hoje() && a.status === 'aberto'; }) || null;
     var configs = Array.isArray(results[14]) ? results[14] : [];
@@ -777,16 +796,17 @@ function calcTotais() {
   var totalConta = fatConta + fatPDVConta;
   var fatPlat = receitas.reduce(function(a, r) { return a + (+r.valor || 0); }, 0);
   var totalAportes = aportes.reduce(function(a, ap) { return a + (+ap.valor || 0); }, 0);
+  var totalRendimentos = rendimentos.reduce(function(a, r) { return a + (+r.valor || 0); }, 0);
   var totalFat = fatVendas + fatPDV + fatPlat;
   var totalReinvest = Math.round((fatVendas + fatPDV) * REINVEST * 100) / 100;
   var totalReinvestUsado = reinvestimentos.reduce(function(a, r) { return a + (+r.valor || 0); }, 0);
   var totalLiquido = (fatVendas + fatPDV) - totalReinvestUsado;
   var totalDespPagas = getDespesas().filter(function(d) { return pagamentos[d.dia + '-' + d.desc]; }).reduce(function(a, d) { return a + d.val; }, 0);
   var totalSaidas = saidas.reduce(function(a, s) { return a + (+s.valor || 0); }, 0);
-  var saldoConta = saldoInicial.valor + totalLiquido + fatPlat + totalAportes - totalDespPagas - totalSaidas;
+  var saldoConta = saldoInicial.valor + totalLiquido + fatPlat + totalAportes + totalRendimentos - totalDespPagas - totalSaidas;
   var saldoTotal = saldoConta + caixaFixoAtual.valor;
   var metaMes = perfil.meta_mensal || 9500;
-  return {fatVendas:fatVendas, fatPDV:fatPDV, pdvDinheiro:pdvDinheiro, pdvPix:pdvPix, pdvDebito:pdvDebito, pdvCredito:pdvCredito, pdvOutros:pdvOutros, fatDinheiro:fatDinheiro, fatConta:fatConta, totalDinheiro:totalDinheiro, totalConta:totalConta, totalAportes:totalAportes, fatPlat:fatPlat, totalFat:totalFat, totalReinvest:totalReinvest, totalReinvestUsado:totalReinvestUsado, totalLiquido:totalLiquido, totalDespPagas:totalDespPagas, totalSaidas:totalSaidas, saldoConta:saldoConta, saldoTotal:saldoTotal, metaMes:metaMes};
+  return {fatVendas:fatVendas, fatPDV:fatPDV, pdvDinheiro:pdvDinheiro, pdvPix:pdvPix, pdvDebito:pdvDebito, pdvCredito:pdvCredito, pdvOutros:pdvOutros, fatDinheiro:fatDinheiro, fatConta:fatConta, totalDinheiro:totalDinheiro, totalConta:totalConta, totalAportes:totalAportes, totalRendimentos:totalRendimentos, fatPlat:fatPlat, totalFat:totalFat, totalReinvest:totalReinvest, totalReinvestUsado:totalReinvestUsado, totalLiquido:totalLiquido, totalDespPagas:totalDespPagas, totalSaidas:totalSaidas, saldoConta:saldoConta, saldoTotal:saldoTotal, metaMes:metaMes};
 }
 
 function fatHoje() {
@@ -937,6 +957,7 @@ function renderDashboard() {
     ['Entradas manuais', fmt(t.fatVendas), 'var(--green)'],
     ['Receitas externas', fmt(t.fatPlat), 'var(--green)'],
     ['Aportes pessoais', fmt(t.totalAportes), 'var(--blue)'],
+    (t.totalRendimentos > 0 ? ['Rendimentos invest.', fmt(t.totalRendimentos), '#a855f7'] : null),
     ['Reinvest. usado', '- ' + fmt(t.totalReinvestUsado), 'var(--yellow)'],
     ['Reinvest. total (35%)', fmt(t.totalReinvest), 'var(--yellow)'],
     ['Desp. pagas', '- ' + fmt(t.totalDespPagas), 'var(--red)'],
@@ -1315,6 +1336,18 @@ function renderLancar() {
     '<div class="field"><label>📦 Caixa fixo (fundo de troco)</label><input type="number" id="lancCaixaFixo" placeholder="' + (caixaFixoAtual.valor || '0.00') + '" step="0.01" inputmode="decimal" value="' + (caixaFixoAtual.valor || '') + '"></div>' +
     '<div class="msg" id="lancMsg"></div>' +
     '<button class="btn btn-primary" onclick="salvarLanc()" style="margin-bottom:16px;">✓ Registrar e fechar caixa do dia</button>' +
+    '<div class="divider"></div>' +
+    '<div class="sec">Rendimentos de investimentos <button class="btn btn-sm" style="background:#a855f7;color:#fff;font-size:10px;padding:2px 8px;border-radius:4px;" onclick="abrirRendimentoModal()">+ Novo</button></div>' +
+    '<div style="font-size:11px;color:#a855f7;margin-bottom:8px;padding:8px;background:rgba(168,85,247,0.1);border:1px solid rgba(168,85,247,0.3);border-radius:6px;">CDB, poupanca, conta remunerada etc. Somam ao saldo.</div>' +
+    (rendimentos.length === 0 ? '<div class="empty" style="margin-bottom:10px;">Nenhum rendimento registrado.</div>' :
+      rendimentos.map(function(r) {
+        return '<div class="li">' +
+          '<div class="li-info"><div class="li-title">' + (r.descricao||'Rendimento') + '</div>' +
+          '<div class="li-sub">' + r.data + (r.conta?' - '+r.conta:'') + '</div></div>' +
+          '<div style="text-align:right;"><div class="li-val" style="color:#a855f7;">+ ' + fmt(+r.valor) + '</div>' +
+          '<button class="btn btn-sm btn-danger-sm" style="margin-top:4px;" onclick="deletarRendimento(&quot;' + r.id + '&quot;)">excluir</button></div>' +
+        '</div>';
+      }).join('')) +
     '<div class="divider"></div>' +
     '<div class="sec">Aportes pessoais <button class="btn btn-sm btn-blue-sm" onclick="abrirAporteModal()">+ Novo</button></div>' +
     '<div class="alert alert-blue" style="margin-bottom:8px;font-size:11px;">Dinheiro pessoal investido no negocio. Aparece separado do faturamento no resumo.</div>' +
@@ -1869,6 +1902,39 @@ async function deletarLanc(id) {
   lancamentos = lancamentos.filter(function(l) { return l.id !== id; });
   renderAll();
   try { await sb('lancamentos?id=eq.' + id, {method:'DELETE'}); } catch(e) {}
+}
+
+function abrirRendimentoModal() {
+  document.getElementById('rendVal').value = '';
+  document.getElementById('rendData').value = hoje();
+  document.getElementById('rendDesc').value = '';
+  document.getElementById('rendConta').value = '';
+  document.getElementById('rendMsg').textContent = '';
+  document.getElementById('moRendimento').classList.add('open');
+}
+
+async function salvarRendimento() {
+  var valor = parseFloat(document.getElementById('rendVal').value) || 0;
+  var data = document.getElementById('rendData').value || hoje();
+  var desc = document.getElementById('rendDesc').value.trim() || 'Rendimento';
+  var conta = document.getElementById('rendConta').value.trim();
+  if (valor <= 0) { showMsg('rendMsg', 'Informe o valor.', 'err'); return; }
+  showMsg('rendMsg', 'Salvando...', 'warn');
+  try {
+    var res = await sb('rendimentos', {method:'POST', headers:{'Prefer':'return=representation'}, body:JSON.stringify({
+      user_id:userId, data:data, mes_ano:MES_ANO, valor:valor, descricao:desc, conta:conta
+    })});
+    if (Array.isArray(res) && res[0]) rendimentos.unshift(res[0]);
+    showMsg('rendMsg', 'Registrado!', 'ok');
+    setTimeout(function() { fecharMo('moRendimento'); renderAll(); }, 700);
+  } catch(e) { showMsg('rendMsg', 'Erro: ' + e.message, 'err'); }
+}
+
+async function deletarRendimento(id) {
+  if (!confirm('Excluir este rendimento?')) return;
+  rendimentos = rendimentos.filter(function(r) { return r.id !== id; });
+  renderAll();
+  try { await sb('rendimentos?id=eq.' + id, {method:'DELETE'}); } catch(e) {}
 }
 
 function abrirAporteModal() {
