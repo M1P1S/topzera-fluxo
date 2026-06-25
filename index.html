@@ -681,7 +681,7 @@ function getMesAno() {
 const MES_ANO = getMesAno();
 const REINVEST = 0.35;
 
-let lancamentos = [], pagamentos = {}, receitas = [], saidas = [], vendas = [], produtos = [], categorias = [], fornecedores = [], reinvestimentos = [], despesasFixas = [], faturamentoHistorico = [], aportes = [], fechamentos = [], aberturas = [], rendimentos = [], retiradasGuarda = [];
+let lancamentos = [], pagamentos = {}, pagamentosValores = {}, receitas = [], saidas = [], vendas = [], produtos = [], categorias = [], fornecedores = [], reinvestimentos = [], despesasFixas = [], faturamentoHistorico = [], aportes = [], fechamentos = [], aberturas = [], rendimentos = [], retiradasGuarda = [];
 let caixaAberto = null; // abertura do dia atual
 let saldoInicial = {valor:0, data:new Date().toISOString().split('T')[0], obs:''};
 let caixaFixoAtual = {valor:0, data:new Date().toISOString().split('T')[0]};
@@ -757,6 +757,7 @@ async function carregarDados() {
       sb('fornecedores?user_id=eq.' + uid + '&order=nome.asc').catch(function() { return []; }),
       sb('reinvestimentos?user_id=eq.' + uid + '&mes_ano=eq.' + MES_ANO + '&order=data.asc').catch(function() { return []; }),
       sb('despesas_fixas?user_id=eq.' + uid + '&ativo=eq.true&order=sem.asc,dia.asc').catch(function() { return []; }),
+      sb('despesas_fixas_valores?user_id=eq.' + uid + '&mes_ano_inicio=lte.' + MES_ANO + '&order=mes_ano_inicio.asc').catch(function() { return []; }),
       sb('faturamento_historico?user_id=eq.' + uid + '&order=mes_ano.asc').catch(function() { return []; }),
       sb('aportes?user_id=eq.' + uid + '&mes_ano=eq.' + MES_ANO + '&order=data.asc').catch(function() { return []; }),
       sb('fechamento_caixa?user_id=eq.' + uid + '&mes_ano=eq.' + MES_ANO + '&order=data.desc').catch(function() { return []; }),
@@ -768,7 +769,11 @@ async function carregarDados() {
     ]);
     lancamentos = Array.isArray(results[0]) ? results[0] : [];
     pagamentos = {};
-    (Array.isArray(results[1]) ? results[1] : []).forEach(function(p) { pagamentos[p.dia + '-' + p.descricao] = p.pago; });
+    pagamentosValores = {};
+    (Array.isArray(results[1]) ? results[1] : []).forEach(function(p) {
+      pagamentos[p.dia + '-' + p.descricao] = p.pago;
+      pagamentosValores[p.dia + '-' + p.descricao] = p.valor_pago != null ? +p.valor_pago : null;
+    });
     receitas = Array.isArray(results[2]) ? results[2] : [];
     saidas = Array.isArray(results[3]) ? results[3] : [];
     vendas = Array.isArray(results[4]) ? results[4] : [];
@@ -777,14 +782,24 @@ async function carregarDados() {
     fornecedores = Array.isArray(results[7]) ? results[7] : [];
     reinvestimentos = Array.isArray(results[8]) ? results[8] : [];
     despesasFixas = Array.isArray(results[9]) ? results[9].map(function(d) { return {id:d.id, desc:d.descricao, val:+d.valor, dia:d.dia, sem:d.sem, cat:d.cat}; }) : [];
-    faturamentoHistorico = Array.isArray(results[10]) ? results[10] : [];
-    aportes = Array.isArray(results[11]) ? results[11] : [];
-    fechamentos = Array.isArray(results[12]) ? results[12] : [];
-    aberturas = Array.isArray(results[13]) ? results[13] : [];
-    rendimentos = Array.isArray(results[14]) ? results[14] : [];
-    retiradasGuarda = Array.isArray(results[15]) ? results[15] : [];
-    var configs = Array.isArray(results[16]) ? results[16] : [];
-    var cf = Array.isArray(results[17]) ? results[17] : [];
+    // Aplicar valor de vigencia correto para o MES_ANO atual (historico de valores)
+    var valoresVigencia = Array.isArray(results[10]) ? results[10] : [];
+    var vigenciaMap = {};
+    valoresVigencia.forEach(function(v) {
+      // Como veio ordenado por mes_ano_inicio asc e filtrado <= MES_ANO, o ultimo de cada despesa_id e o vigente
+      vigenciaMap[v.despesa_id] = +v.valor;
+    });
+    despesasFixas = despesasFixas.map(function(d) {
+      return vigenciaMap[d.id] != null ? Object.assign({}, d, {val: vigenciaMap[d.id]}) : d;
+    });
+    faturamentoHistorico = Array.isArray(results[11]) ? results[11] : [];
+    aportes = Array.isArray(results[12]) ? results[12] : [];
+    fechamentos = Array.isArray(results[13]) ? results[13] : [];
+    aberturas = Array.isArray(results[14]) ? results[14] : [];
+    rendimentos = Array.isArray(results[15]) ? results[15] : [];
+    retiradasGuarda = Array.isArray(results[16]) ? results[16] : [];
+    var configs = Array.isArray(results[17]) ? results[17] : [];
+    var cf = Array.isArray(results[18]) ? results[18] : [];
     // Verificar se tem caixa aberto hoje
     caixaAberto = aberturas.find(function(a) { return a.data === hoje() && a.status === 'aberto'; }) || null;
     var si = configs.find(function(c) { return c.chave === 'saldo_inicial'; });
@@ -826,7 +841,11 @@ function calcTotais() {
   var totalReinvest = Math.round((fatVendas + fatPDV) * REINVEST * 100) / 100;
   var totalReinvestUsado = reinvestimentos.reduce(function(a, r) { return a + (+r.valor || 0); }, 0);
   var totalLiquido = (fatVendas + fatPDV) - totalReinvestUsado;
-  var totalDespPagas = getDespesas().filter(function(d) { return pagamentos[d.dia + '-' + d.desc]; }).reduce(function(a, d) { return a + d.val; }, 0);
+  var totalDespPagas = getDespesas().filter(function(d) { return pagamentos[d.dia + '-' + d.desc]; }).reduce(function(a, d) {
+    var key = d.dia + '-' + d.desc;
+    var vp = pagamentosValores[key];
+    return a + (vp != null ? vp : d.val); // usa valor congelado no pagamento, senao usa o atual
+  }, 0);
   var totalSaidas = saidas.reduce(function(a, s) { return a + (+s.valor || 0); }, 0);
   var saldoConta = saldoInicial.valor + totalLiquido + fatPlat + totalAportes + totalRendimentos - totalDespPagas - totalSaidas;
   var saldoTotal = saldoConta + caixaFixoAtual.valor + totalGuardado;
@@ -2242,7 +2261,18 @@ async function togglePago(dia, desc) {
   var key = String(dia) + '-' + String(desc);
   var nv = !pagamentos[key];
   pagamentos[key] = nv;
-  try { await sb('pagamentos', {method:'POST', headers:{'Prefer':'resolution=merge-duplicates,return=representation'}, body:JSON.stringify({dia:parseInt(dia), descricao:String(desc), mes_ano:MES_ANO, pago:nv, pago_em:nv ? new Date().toISOString() : null, user_id:userId})}); } catch(e) { console.error('togglePago erro:', e); }
+  try {
+    if (nv) {
+      // Marcar como pago — congelar o valor vigente nesse mes
+      var desp = getDespesas().find(function(d) { return String(d.dia) === String(dia) && d.desc === desc; });
+      var valorCongelado = desp ? desp.val : null;
+      pagamentosValores[key] = valorCongelado;
+      await sb('pagamentos', {method:'POST', headers:{'Prefer':'resolution=merge-duplicates,return=representation'}, body:JSON.stringify({dia:parseInt(dia), descricao:String(desc), mes_ano:MES_ANO, pago:true, pago_em:new Date().toISOString(), valor_pago:valorCongelado, user_id:userId})});
+    } else {
+      delete pagamentosValores[key];
+      await sb('pagamentos?dia=eq.' + parseInt(dia) + '&descricao=eq.' + encodeURIComponent(String(desc)) + '&mes_ano=eq.' + MES_ANO + '&user_id=eq.' + userId, {method:'DELETE'});
+    }
+  } catch(e) { console.error('togglePago erro:', e); }
   renderAll();
 }
 
@@ -2411,23 +2441,68 @@ async function salvarDesp(idx) {
   var sem = parseInt(document.getElementById('dSem').value) || 1;
   var cat = document.getElementById('dCat').value;
   if (!descricao || valor <= 0) { showMsg('dMsg', 'Preencha descricao e valor.', 'err'); return; }
+
+  if (idx !== null && idx !== undefined) {
+    var d = getDespesas()[idx];
+    if (d && d.id && +d.val !== valor) {
+      // Valor mudou - perguntar a partir de quando vale
+      abrirVigenciaModal(d.id, descricao, valor, dia, sem, cat);
+      return;
+    }
+  }
+
   showMsg('dMsg', 'Salvando...', 'warn');
   try {
     if (idx !== null && idx !== undefined) {
-      // Editar despesa existente no banco
-      var d = getDespesas()[idx];
-      if (d && d.id) {
-        await sb('despesas_fixas?id=eq.' + d.id, {method:'PATCH', body:JSON.stringify({descricao:descricao, valor:valor, dia:dia, sem:sem, cat:cat})});
-        despesasFixas = despesasFixas.map(function(x) { return x.id === d.id ? Object.assign({}, x, {desc:descricao, val:valor, dia:dia, sem:sem, cat:cat}) : x; });
+      var d2 = getDespesas()[idx];
+      if (d2 && d2.id) {
+        await sb('despesas_fixas?id=eq.' + d2.id, {method:'PATCH', body:JSON.stringify({descricao:descricao, valor:valor, dia:dia, sem:sem, cat:cat})});
+        despesasFixas = despesasFixas.map(function(x) { return x.id === d2.id ? Object.assign({}, x, {desc:descricao, val:valor, dia:dia, sem:sem, cat:cat}) : x; });
       }
     } else {
-      // Nova despesa
       var res = await sb('despesas_fixas', {method:'POST', headers:{'Prefer':'return=representation'}, body:JSON.stringify({user_id:userId, descricao:descricao, valor:valor, dia:dia, sem:sem, cat:cat})});
-      if (Array.isArray(res) && res[0]) despesasFixas.push({id:res[0].id, desc:descricao, val:valor, dia:dia, sem:sem, cat:cat});
+      if (Array.isArray(res) && res[0]) {
+        despesasFixas.push({id:res[0].id, desc:descricao, val:valor, dia:dia, sem:sem, cat:cat});
+        await sb('despesas_fixas_valores', {method:'POST', body:JSON.stringify({user_id:userId, despesa_id:res[0].id, valor:valor, mes_ano_inicio:MES_ANO})});
+      }
     }
     showMsg('dMsg', 'Salvo!', 'ok');
     setTimeout(function() { fecharMo('moConfig'); renderAll(); }, 700);
   } catch(e) { showMsg('dMsg', 'Erro: ' + e.message, 'err'); }
+}
+
+function abrirVigenciaModal(despesaId, descricao, novoValor, dia, sem, cat) {
+  var mesAtualLabel = new Date(MES_ANO + '-01T12:00:00').toLocaleDateString('pt-BR', {month:'long', year:'numeric'});
+  var mesProxDate = new Date(MES_ANO + '-01T12:00:00'); mesProxDate.setMonth(mesProxDate.getMonth()+1);
+  var mesProxAno = mesProxDate.getFullYear() + '-' + String(mesProxDate.getMonth()+1).padStart(2,'0');
+  var mesProxLabel = mesProxDate.toLocaleDateString('pt-BR', {month:'long', year:'numeric'});
+
+  document.getElementById('moConfigTitle').textContent = 'A partir de quando vale esse valor?';
+  document.getElementById('moConfigContent').innerHTML =
+    '<div class="alert alert-blue" style="margin-bottom:14px;">O valor de <strong>' + descricao + '</strong> mudou para <strong>' + fmt(novoValor) + '</strong>. Isso e um reajuste, certo? Escolha a partir de quando vale:</div>' +
+    '<button class="btn btn-outline" style="width:100%;margin-bottom:8px;text-align:left;" onclick="confirmarVigencia(&quot;' + despesaId + '&quot;,' + novoValor + ',&quot;' + descricao + '&quot;,' + dia + ',' + sem + ',&quot;' + cat + '&quot;,&quot;' + MES_ANO + '&quot;)">📅 A partir de ' + mesAtualLabel + ' (mes atual)<br><span style="font-size:10px;color:var(--text3);">Meses anteriores mantem o valor antigo no historico</span></button>' +
+    '<button class="btn btn-outline" style="width:100%;margin-bottom:8px;text-align:left;" onclick="confirmarVigencia(&quot;' + despesaId + '&quot;,' + novoValor + ',&quot;' + descricao + '&quot;,' + dia + ',' + sem + ',&quot;' + cat + '&quot;,&quot;' + mesProxAno + '&quot;)">📅 A partir de ' + mesProxLabel + ' (proximo mes)<br><span style="font-size:10px;color:var(--text3);">Mes atual mantem o valor antigo</span></button>' +
+    '<button class="btn btn-outline" style="width:100%;" onclick="renderConfig();document.getElementById(&quot;moConfig&quot;).classList.add(&quot;open&quot;)">Cancelar</button>';
+  document.getElementById('moConfig').classList.add('open');
+}
+
+async function confirmarVigencia(despesaId, novoValor, descricao, dia, sem, cat, mesAnoInicio) {
+  try {
+    // Atualizar dados gerais (dia, sem, cat, descricao) sempre
+    await sb('despesas_fixas?id=eq.' + despesaId, {method:'PATCH', body:JSON.stringify({descricao:descricao, dia:dia, sem:sem, cat:cat, valor:novoValor})});
+    // Registrar o novo valor de vigencia a partir do mes escolhido
+    await sb('despesas_fixas_valores', {method:'POST', headers:{'Prefer':'resolution=merge-duplicates,return=representation'}, body:JSON.stringify({
+      user_id:userId, despesa_id:despesaId, valor:novoValor, mes_ano_inicio:mesAnoInicio
+    })});
+    // Se a vigencia escolhida for o mes atual ou anterior, atualiza em memoria para refletir agora
+    if (mesAnoInicio <= MES_ANO) {
+      despesasFixas = despesasFixas.map(function(x) { return x.id === despesaId ? Object.assign({}, x, {desc:descricao, val:novoValor, dia:dia, sem:sem, cat:cat}) : x; });
+    } else {
+      despesasFixas = despesasFixas.map(function(x) { return x.id === despesaId ? Object.assign({}, x, {desc:descricao, dia:dia, sem:sem, cat:cat}) : x; });
+    }
+    fecharMo('moConfig');
+    renderAll();
+  } catch(e) { alert('Erro: ' + e.message); }
 }
 
 function fecharMo(id) { document.getElementById(id).classList.remove('open'); }
