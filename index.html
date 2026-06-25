@@ -1362,7 +1362,7 @@ function renderLancar() {
       '</div>' +
       '<div style="text-align:right;">' +
         '<div class="li-val" style="color:var(--yellow);">- ' + fmt(+r.valor) + '</div>' +
-        '<button class="btn btn-sm btn-danger-sm" style="margin-top:4px;" onclick="deletarReinvest(' + JSON.stringify(r.id) + ')">excluir</button>' +
+        '<button class="btn btn-sm btn-danger-sm" style="margin-top:4px;" onclick="deletarReinvest(&quot;' + r.id + '&quot;)">excluir</button>' +
       '</div>' +
     '</div>';
   }).join('');
@@ -2136,9 +2136,16 @@ async function salvarReinvest() {
 
 async function deletarReinvest(id) {
   if (!confirm('Excluir este reinvestimento?')) return;
+  var anterior = reinvestimentos;
   reinvestimentos = reinvestimentos.filter(function(r) { return r.id !== id; });
   renderAll();
-  try { await sb('reinvestimentos?id=eq.' + id, {method:'DELETE'}); } catch(e) {}
+  try {
+    await sb('reinvestimentos?id=eq.' + id, {method:'DELETE'});
+  } catch(e) {
+    reinvestimentos = anterior;
+    renderAll();
+    alert('Nao foi possivel excluir: ' + e.message);
+  }
 }
 
 function abrirFechamentoCaixa() {
