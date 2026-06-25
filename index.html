@@ -2463,7 +2463,7 @@ async function salvarDesp(idx) {
       var res = await sb('despesas_fixas', {method:'POST', headers:{'Prefer':'return=representation'}, body:JSON.stringify({user_id:userId, descricao:descricao, valor:valor, dia:dia, sem:sem, cat:cat})});
       if (Array.isArray(res) && res[0]) {
         despesasFixas.push({id:res[0].id, desc:descricao, val:valor, dia:dia, sem:sem, cat:cat});
-        await sb('despesas_fixas_valores', {method:'POST', body:JSON.stringify({user_id:userId, despesa_id:res[0].id, valor:valor, mes_ano_inicio:MES_ANO})});
+        await sb('despesas_fixas_valores?on_conflict=despesa_id,mes_ano_inicio', {method:'POST', headers:{'Prefer':'resolution=merge-duplicates,return=representation'}, body:JSON.stringify({user_id:userId, despesa_id:res[0].id, valor:valor, mes_ano_inicio:MES_ANO})});
       }
     }
     showMsg('dMsg', 'Salvo!', 'ok');
@@ -2491,7 +2491,7 @@ async function confirmarVigencia(despesaId, novoValor, descricao, dia, sem, cat,
     // Atualizar dados gerais (dia, sem, cat, descricao) sempre
     await sb('despesas_fixas?id=eq.' + despesaId, {method:'PATCH', body:JSON.stringify({descricao:descricao, dia:dia, sem:sem, cat:cat, valor:novoValor})});
     // Registrar o novo valor de vigencia a partir do mes escolhido
-    await sb('despesas_fixas_valores', {method:'POST', headers:{'Prefer':'resolution=merge-duplicates,return=representation'}, body:JSON.stringify({
+    await sb('despesas_fixas_valores?on_conflict=despesa_id,mes_ano_inicio', {method:'POST', headers:{'Prefer':'resolution=merge-duplicates,return=representation'}, body:JSON.stringify({
       user_id:userId, despesa_id:despesaId, valor:novoValor, mes_ano_inicio:mesAnoInicio
     })});
     // Se a vigencia escolhida for o mes atual ou anterior, atualiza em memoria para refletir agora
