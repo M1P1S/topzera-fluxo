@@ -279,7 +279,7 @@ body{font-family:"DM Mono",monospace;background:var(--bg);color:var(--text);min-
 <div class="mo" id="moVendaDetalhe">
   <div class="mo-body">
     <div class="mo-handle"></div>
-    <div class="mo-title">Detalhes da Venda</div>
+    <div class="mo-title">Detalhes</div>
     <div id="moVendaDetalheContent"></div>
     <button class="btn btn-outline" onclick="fecharMo('moVendaDetalhe')" style="margin-top:12px;">Fechar</button>
   </div>
@@ -424,7 +424,6 @@ async function sb(path, opts) {
   if (token) hdrs['Authorization'] = 'Bearer ' + token;
   Object.assign(hdrs, opts.headers || {});
   const r = await fetch(SB + '/rest/v1/' + path, Object.assign({}, opts, {headers:hdrs}));
-  // Token expirado - tentar renovar automaticamente
   if (r.status === 401) {
     var renovado = await renovarToken();
     if (renovado) {
@@ -565,7 +564,6 @@ async function carregarPerfil() {
 
 async function logout() {
   if (!confirm('Sair do sistema?')) return;
-  // Limpar todos os dados locais ao sair
   token = null; userId = null; perfil = {};
   lancamentos = []; pagamentos = {}; receitas = []; saidas = []; vendas = [];
   produtos = []; categorias = []; fornecedores = []; reinvestimentos = []; despesasFixas = [];
@@ -593,29 +591,48 @@ function mostrarApp() {
 }
 
 function verificarMesAnterior() {
-  // Verificar se virou o mês e salvar histórico automaticamente
-  var hoje = new Date();
-  var mesAtual = hoje.getFullYear() + '-' + String(hoje.getMonth()+1).padStart(2,'0');
+  // Verificar se virou o mes e salvar historico completo automaticamente
+  var hojeD = new Date();
+  var mesAtual = hojeD.getFullYear() + '-' + String(hojeD.getMonth()+1).padStart(2,'0');
   var ultimoCheck = localStorage.getItem('fc_mes_check_' + userId);
   if (ultimoCheck && ultimoCheck !== mesAtual) {
-    // Virou o mês - salvar histórico do mês anterior
-    var t = calcTotais();
-    if (t.totalFat > 0) {
-      sb('faturamento_historico', {method:'POST', headers:{'Prefer':'resolution=merge-duplicates,return=representation'}, body:JSON.stringify({
-        user_id:userId, mes_ano:ultimoCheck, total:t.totalFat
-      })}).catch(function(){});
-    }
+    // Virou o mes - salvar snapshot completo do mes anterior
+    fecharMesAnterior(ultimoCheck);
   }
   localStorage.setItem('fc_mes_check_' + userId, mesAtual);
 }
 
+async function fecharMesAnterior(mesAnoFechado) {
+  try {
+    var t = calcTotais();
+    if (t.totalFat <= 0 && t.totalDespPagas <= 0) return;
+    await sb('historico_mensal', {method:'POST', headers:{'Prefer':'resolution=merge-duplicates,return=representation'}, body:JSON.stringify({
+      user_id:userId,
+      mes_ano:mesAnoFechado,
+      faturamento_total:t.totalFat,
+      faturamento_dinheiro:t.totalDinheiro,
+      faturamento_pix:t.fatConta,
+      faturamento_debito:0,
+      faturamento_credito:0,
+      despesas_total:t.totalDespPagas,
+      despesas_pagas:t.totalDespPagas,
+      reinvestimentos_total:t.totalReinvestUsado,
+      saidas_total:t.totalSaidas,
+      aportes_total:t.totalAportes,
+      saldo_inicial:saldoInicial.valor,
+      saldo_final:t.saldoTotal,
+      caixa_fixo_final:caixaFixoAtual.valor
+    })});
+    sb('faturamento_historico', {method:'POST', headers:{'Prefer':'resolution=merge-duplicates,return=representation'}, body:JSON.stringify({
+      user_id:userId, mes_ano:mesAnoFechado, total:t.totalFat
+    })}).catch(function(){});
+  } catch(e) { console.error('Erro ao fechar mes anterior:', e); }
+}
+
 function verificarAberturaCaixa() {
-  // Verificar se tem caixa aberto hoje após carregar dados
   if (!caixaAberto) {
-    // Verificar se tem fechamento de hoje (pode ter esquecido de abrir)
     var fechHoje = fechamentos.find(function(f) { return f.data === hoje(); });
     if (!fechHoje) {
-      // Mostrar modal de abertura
       abrirCaixaModal();
     }
   }
@@ -635,14 +652,11 @@ async function confirmarAbertura() {
     var res = await sb('abertura_caixa', {method:'POST', headers:{'Prefer':'return=representation'}, body:JSON.stringify({
       user_id:userId, data:hoje(), mes_ano:MES_ANO, caixa_fixo:cf, status:'aberto'
     })});
-    // NÃO atualiza o caixa fixo na abertura - apenas registra para referência
-    // O caixa fixo só é atualizado no FECHAMENTO
     caixaAberto = Array.isArray(res) ? res[0] : res;
     if (Array.isArray(aberturas)) aberturas.unshift(caixaAberto);
     showMsg('abertMsg', 'Caixa aberto!', 'ok');
     setTimeout(function() { fecharMo('moAbertura'); renderAll(); }, 700);
   } catch(e) {
-    // Se já existe abertura para hoje, apenas fechar modal
     if (e.message && e.message.includes('duplicate')) {
       caixaAberto = {data:hoje(), status:'aberto'};
       fecharMo('moAbertura');
@@ -682,7 +696,7 @@ const MES_ANO = getMesAno();
 const REINVEST = 0.35;
 
 let lancamentos = [], pagamentos = {}, pagamentosValores = {}, receitas = [], saidas = [], vendas = [], produtos = [], categorias = [], fornecedores = [], reinvestimentos = [], despesasFixas = [], faturamentoHistorico = [], aportes = [], fechamentos = [], aberturas = [], rendimentos = [], retiradasGuarda = [];
-let caixaAberto = null; // abertura do dia atual
+let caixaAberto = null;
 let saldoInicial = {valor:0, data:new Date().toISOString().split('T')[0], obs:''};
 let caixaFixoAtual = {valor:0, data:new Date().toISOString().split('T')[0]};
 let despesasExtra = [];
@@ -690,7 +704,7 @@ let carrinho = [];
 let editProdId = null, ajusteEstoqueProdId = null;
 let charts = {};
 
-const DESPESAS_PADRAO = []; // Despesas agora vem do banco (tabela despesas_fixas)
+const DESPESAS_PADRAO = [];
 
 const SEMANAS = [
   {num:1, label:'Semana 1', periodo:'01 a 07', dias:[1,2,3,4,5,6,7]},
@@ -700,7 +714,6 @@ const SEMANAS = [
 ];
 
 function getDespesas() {
-  // Usar despesas do banco (por usuario) + extras locais nao-override
   var extras = despesasExtra.filter(function(d) { return !d._override && !d._desativada; });
   var banco = despesasFixas.filter(function(d) { return !d._desativada; });
   var todas = banco.concat(extras);
@@ -731,7 +744,6 @@ function showMsg(id, txt, cor) {
 
 async function carregarDados() {
   setSyncBadge('load');
-  // Resetar todos os dados antes de carregar do banco
   lancamentos = []; pagamentos = {}; receitas = []; saidas = []; vendas = [];
   produtos = []; categorias = []; fornecedores = []; reinvestimentos = []; despesasFixas = [];
   saldoInicial = {valor:0, data:hoje(), obs:''};
@@ -782,11 +794,9 @@ async function carregarDados() {
     fornecedores = Array.isArray(results[7]) ? results[7] : [];
     reinvestimentos = Array.isArray(results[8]) ? results[8] : [];
     despesasFixas = Array.isArray(results[9]) ? results[9].map(function(d) { return {id:d.id, desc:d.descricao, val:+d.valor, dia:d.dia, sem:d.sem, cat:d.cat}; }) : [];
-    // Aplicar valor de vigencia correto para o MES_ANO atual (historico de valores)
     var valoresVigencia = Array.isArray(results[10]) ? results[10] : [];
     var vigenciaMap = {};
     valoresVigencia.forEach(function(v) {
-      // Como veio ordenado por mes_ano_inicio asc e filtrado <= MES_ANO, o ultimo de cada despesa_id e o vigente
       vigenciaMap[v.despesa_id] = +v.valor;
     });
     despesasFixas = despesasFixas.map(function(d) {
@@ -800,7 +810,6 @@ async function carregarDados() {
     retiradasGuarda = Array.isArray(results[16]) ? results[16] : [];
     var configs = Array.isArray(results[17]) ? results[17] : [];
     var cf = Array.isArray(results[18]) ? results[18] : [];
-    // Verificar se tem caixa aberto hoje
     caixaAberto = aberturas.find(function(a) { return a.data === hoje() && a.status === 'aberto'; }) || null;
     var si = configs.find(function(c) { return c.chave === 'saldo_inicial'; });
     if (si) {
@@ -814,6 +823,8 @@ async function carregarDados() {
     setSyncBadge('err');
   }
   renderAll();
+  verificarMesAnterior();
+  verificarAberturaCaixa();
 }
 
 function calcTotais() {
@@ -833,7 +844,6 @@ function calcTotais() {
   var fatPlat = receitas.reduce(function(a, r) { return a + (+r.valor || 0); }, 0);
   var totalAportes = aportes.reduce(function(a, ap) { return a + (+ap.valor || 0); }, 0);
   var totalRendimentos = rendimentos.reduce(function(a, r) { return a + (+r.valor || 0); }, 0);
-  // Dinheiro guardado fisicamente fora do caixa fixo (retiradas - devolucoes)
   var totalGuardado = retiradasGuarda.reduce(function(a, r) {
     return a + (r.tipo === 'devolucao' ? -(+r.valor||0) : (+r.valor||0));
   }, 0);
@@ -844,7 +854,7 @@ function calcTotais() {
   var totalDespPagas = getDespesas().filter(function(d) { return pagamentos[d.dia + '-' + d.desc]; }).reduce(function(a, d) {
     var key = d.dia + '-' + d.desc;
     var vp = pagamentosValores[key];
-    return a + (vp != null ? vp : d.val); // usa valor congelado no pagamento, senao usa o atual
+    return a + (vp != null ? vp : d.val);
   }, 0);
   var totalSaidas = saidas.reduce(function(a, s) { return a + (+s.valor || 0); }, 0);
   var saldoConta = saldoInicial.valor + totalLiquido + fatPlat + totalAportes + totalRendimentos - totalDespPagas - totalSaidas;
@@ -874,7 +884,6 @@ function showPage(id, btn) {
 }
 
 function renderAll() {
-  // Atualizar status do caixa no header
   var statusEl = document.getElementById('headerCaixaStatus');
   if (statusEl) {
     if (caixaAberto) {
@@ -904,7 +913,6 @@ function renderPrestacaoContas() {
   var html = '';
   var t = calcTotais();
 
-  // --- DESPESAS FIXAS ---
   var desp = getDespesas();
   var totalDesp = desp.reduce(function(a,d){return a+d.val;},0);
   var totalDespPagas = desp.filter(function(d){return pagamentos[d.dia+'-'+d.desc];}).reduce(function(a,d){return a+d.val;},0);
@@ -930,7 +938,6 @@ function renderPrestacaoContas() {
   });
   html += '</div>';
 
-  // --- SAIDAS VARIAVEIS ---
   var totalSaidas = saidas.reduce(function(a,s){return a+(+s.valor||0);},0);
   html += '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);margin-bottom:10px;overflow:hidden;">' +
     '<div style="padding:10px 13px;background:var(--bg3);display:flex;justify-content:space-between;align-items:center;">' +
@@ -949,7 +956,6 @@ function renderPrestacaoContas() {
   }
   html += '</div>';
 
-  // --- REINVESTIMENTOS ---
   var totalReinvest = reinvestimentos.reduce(function(a,r){return a+(+r.valor||0);},0);
   html += '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);margin-bottom:10px;overflow:hidden;">' +
     '<div style="padding:10px 13px;background:var(--bg3);display:flex;justify-content:space-between;align-items:center;">' +
@@ -978,11 +984,8 @@ function renderDashboard() {
   var pctHoje = Math.min((fh / 365) * 100, 100);
   var baixo = produtosEstoqueBaixo();
   var diaAtual = parseInt(hoje().split('-')[2]);
-  // Despesas atrasadas (dia < hoje, não pagas)
   var atrasadas = getDespesas().filter(function(d) { return d.dia > 0 && d.dia < diaAtual && !pagamentos[d.dia + '-' + d.desc]; });
-  // Próximas despesas (dia >= hoje, não pagas, próximos 5 dias)
   var proximas5 = getDespesas().filter(function(d) { return d.dia >= diaAtual && d.dia <= diaAtual + 5 && !pagamentos[d.dia + '-' + d.desc]; });
-  // Combinar: atrasadas primeiro, depois próximas, máximo 6
   var proximas = atrasadas.concat(proximas5).slice(0, 6);
   var alertas = '';
   if (t.saldoConta < 500) alertas += '<div class="alert alert-red">Saldo em conta abaixo de R$ 500.</div>';
@@ -990,6 +993,7 @@ function renderDashboard() {
   var proxD = getDespesas().filter(function(d) { return d.dia > 0 && d.dia <= diaAtual + 3 && !pagamentos[d.dia + '-' + d.desc]; });
   if (proxD.length > 0) alertas += '<div class="alert alert-yellow">' + proxD.length + ' despesa(s) vencem em ate 3 dias - ' + fmt(proxD.reduce(function(a, d) { return a + d.val; }, 0)) + '</div>';
   if (t.totalFat >= t.metaMes) alertas += '<div class="alert alert-green">Meta do mes atingida!</div>';
+  if (diaAtual <= 3) alertas += '<div class="alert alert-blue">📅 Inicio de mes! Confira e marque suas despesas fixas conforme forem pagas.</div>';
   var resumoRows = [
     ['Saldo inicial (' + saldoInicial.data + ')', fmt(saldoInicial.valor), 'var(--text2)'],
       ['Vendas PDV', fmt(t.fatPDV), 'var(--green)'],
@@ -1028,7 +1032,6 @@ function renderDashboard() {
     '<div class="card purple"><div class="cl">Caixa fixo</div><div class="cv">' + fmt(caixaFixoAtual.valor) + '</div><div class="cs"><button class="btn btn-sm btn-blue-sm" onclick="abrirConfigModal(&quot;caixaFixo&quot;)">Atualizar</button></div></div>' +
     '</div>' +
     (t.totalGuardado !== 0 ? '<div class="card-grid" style="margin-top:8px;"><div class="card" style="border-color:#0ea5e9;"><div class="cl">💰 Guardado fora do caixa</div><div class="cv" style="color:#0ea5e9;">' + fmt(t.totalGuardado) + '</div><div class="cs">Dinheiro retirado e guardado em maos</div></div></div>' : '') +
-    '</div>' +
     alertas +
     '<div class="sec">Meta de hoje</div>' +
     '<div class="pw"><div class="pr"><span>' + fmt(fh) + '</span><span>Meta: R$ 365</span></div><div class="pb"><div class="pf" style="width:' + pctHoje + '%;background:' + (fh >= 365 ? 'var(--green)' : fh >= 200 ? 'var(--yellow)' : 'var(--red)') + ';"></div></div></div>' +
@@ -1166,7 +1169,6 @@ async function fecharCaixaPDV() {
       else{await sb('caixa_fixo',{method:'POST',body:JSON.stringify({valor:cf,data:hoje(),user_id:userId,obs:'Fechamento PDV'})});}
       caixaFixoAtual={valor:cf,data:hoje()};
     }
-    // Diferenca registrada apenas para controle - nao ajusta saldo automaticamente
     await sb('abertura_caixa?user_id=eq.'+userId+'&data=eq.'+hoje(),{method:'PATCH',body:JSON.stringify({status:'fechado'})}).catch(function(){});
     caixaAberto=null;
     showMsg('pdvFechMsg','Caixa fechado!','ok');
@@ -1252,7 +1254,6 @@ async function finalizarVenda() {
 async function cancelarVenda(id) {
   if (!confirm('Cancelar esta venda? O estoque sera devolvido automaticamente.')) return;
   try {
-    // Buscar itens da venda para devolver estoque
     var itens = await sb('venda_itens?venda_id=eq.' + id + '&order=created_at.asc');
     for (var i = 0; i < itens.length; i++) {
       var item = itens[i];
@@ -1263,7 +1264,6 @@ async function cancelarVenda(id) {
         prod.estoque_atual = novoEst;
       }
     }
-    // Deletar itens e venda
     await sb('venda_itens?venda_id=eq.' + id, {method:'DELETE'});
     await sb('vendas?id=eq.' + id, {method:'DELETE'});
     vendas = vendas.filter(function(v) { return v.id !== id; });
@@ -1276,7 +1276,6 @@ async function editarVenda(id) {
   if (!v) return;
   try {
     var itens = await sb('venda_itens?venda_id=eq.' + id + '&order=created_at.asc');
-    // Restaurar carrinho com os itens da venda
     carrinho = itens.map(function(i) {
       return {
         prodId: i.produto_id,
@@ -1287,7 +1286,6 @@ async function editarVenda(id) {
         custoUnit: +i.preco_custo || 0
       };
     });
-    // Cancelar a venda original (devolver estoque)
     for (var j = 0; j < itens.length; j++) {
       var item = itens[j];
       var prod = produtos.find(function(p) { return p.id === item.produto_id; });
@@ -1300,7 +1298,6 @@ async function editarVenda(id) {
     await sb('venda_itens?venda_id=eq.' + id, {method:'DELETE'});
     await sb('vendas?id=eq.' + id, {method:'DELETE'});
     vendas = vendas.filter(function(x) { return x.id !== id; });
-    // Abrir modal de pagamento com carrinho restaurado
     renderPDV();
     abrirPagamento();
   } catch(e) { alert('Erro ao editar: ' + e.message); }
@@ -1463,7 +1460,6 @@ function renderRetiradasGuarda() {
 }
 
 function renderCaixasAnteriores() {
-  // Mostrar caixas fechados dos últimos 7 dias
   var fechadoList = fechamentos.filter(function(f) { return f.data !== hoje(); }).slice(0, 7);
   if (fechadoList.length === 0) {
     return '<div class="empty" style="margin-bottom:10px;">Nenhum caixa anterior.</div>';
@@ -1485,89 +1481,6 @@ function renderCaixasAnteriores() {
   }).join('');
 }
 
-function renderFechamentoInline() {
-  var t = calcTotais();
-  var fechHoje = fechamentos.find(function(f) { return f.data === hoje(); });
-
-  // Calcular entradas do dia de hoje
-  var lancHoje = lancamentos.find(function(l) { return l.data === hoje(); });
-  var vendasHoje = vendas.filter(function(v) { return v.data === hoje(); });
-  var dinHoje = (lancHoje ? +lancHoje.dinheiro || 0 : 0) + vendasHoje.filter(function(v){return v.forma_pagamento==='dinheiro';}).reduce(function(a,v){return a+(+v.total_final||0);},0);
-  var pixHoje = (lancHoje ? +lancHoje.pix || 0 : 0) + vendasHoje.filter(function(v){return v.forma_pagamento==='pix';}).reduce(function(a,v){return a+(+v.total_final||0);},0);
-  var debHoje = (lancHoje ? +lancHoje.debito || 0 : 0) + vendasHoje.filter(function(v){return v.forma_pagamento==='debito';}).reduce(function(a,v){return a+(+v.total_final||0);},0);
-  var credHoje = (lancHoje ? +lancHoje.credito || 0 : 0) + vendasHoje.filter(function(v){return v.forma_pagamento==='credito'||v.forma_pagamento==='outros';}).reduce(function(a,v){return a+(+v.total_final||0);},0);
-  var totalDia = dinHoje + pixHoje + debHoje + credHoje;
-  var saidasHoje = saidas.filter(function(s){return s.data===hoje();}).reduce(function(a,s){return a+(+s.valor||0);},0);
-  var saldoEsperado = caixaFixoAtual.valor + totalDia - saidasHoje;
-  var html = '';
-
-  if (fechHoje) {
-    // Ja fechou hoje
-    html += '<div style="background:var(--green-bg);border:1px solid var(--green2);border-radius:var(--r);padding:14px;margin-bottom:10px;">' +
-      '<div style="font-family:Syne,sans-serif;font-size:13px;font-weight:700;color:var(--green);margin-bottom:8px;">✓ Caixa fechado — ' + fechHoje.data + '</div>' +
-      '<div style="font-size:11px;color:var(--text2);margin-bottom:4px;">Em maos: ' + fmt(+fechHoje.valor_em_maos) + ' | Caixa fixo: ' + fmt(+fechHoje.caixa_fixo) + '</div>' +
-      '<div style="font-size:12px;">Diferenca: <strong style="color:' + (Math.abs(+fechHoje.diferenca)<0.01?'var(--green)':+fechHoje.diferenca>0?'var(--green)':'var(--red)') + ';">' + fmtS(+fechHoje.diferenca) + '</strong>' +
-      (Math.abs(+fechHoje.diferenca)>=0.01?' (saldo ajustado automaticamente)':'') + '</div>' +
-      '<button class="btn btn-sm btn-yellow-sm" style="margin-top:10px;" onclick="reabrirFechamento()">Corrigir fechamento</button>' +
-    '</div>';
-  } else {
-    // Resumo do dia estilo Nextar
-    html += '<div style="background:var(--bg2);border:1px solid #5b21b6;border-radius:var(--r);overflow:hidden;margin-bottom:10px;">' +
-      // Header
-      '<div style="background:var(--purple-bg);padding:12px 14px;border-bottom:1px solid #5b21b6;">' +
-        '<div style="font-family:Syne,sans-serif;font-size:13px;font-weight:700;color:var(--purple);">Resumo do Caixa — ' + hoje() + '</div>' +
-      '</div>' +
-      // Saldo abertura
-      '<div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;font-size:12px;">' +
-        '<span style="color:var(--text3);">Saldo abertura (caixa fixo)</span>' +
-        '<span style="color:var(--purple);">' + fmt(caixaFixoAtual.valor) + '</span>' +
-      '</div>' +
-      // Entradas por forma
-      '<div style="padding:8px 14px 4px;border-bottom:1px solid var(--border);">' +
-        '<div style="font-size:10px;color:var(--text3);text-transform:uppercase;margin-bottom:6px;">Entradas de hoje</div>' +
-        (dinHoje>0?'<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;"><span>💵 Dinheiro</span><span style="color:var(--green);">' + fmt(dinHoje) + '</span></div>':'') +
-        (pixHoje>0?'<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;"><span>📱 Pix</span><span style="color:var(--green);">' + fmt(pixHoje) + '</span></div>':'') +
-        (debHoje>0?'<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;"><span>🔵 Debito</span><span style="color:var(--green);">' + fmt(debHoje) + '</span></div>':'') +
-        (credHoje>0?'<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;"><span>💳 Credito/Outros</span><span style="color:var(--green);">' + fmt(credHoje) + '</span></div>':'') +
-        (totalDia===0?'<div style="font-size:12px;color:var(--text3);padding:4px 0;">Nenhuma entrada lancada hoje.</div>':'') +
-        '<div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-top:1px solid var(--border);margin-top:4px;font-weight:600;"><span>Total entradas</span><span style="color:var(--green);">' + fmt(totalDia) + '</span></div>' +
-      '</div>' +
-      // Saidas do dia
-      (saidasHoje>0?'<div style="padding:8px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;font-size:12px;"><span style="color:var(--text3);">Saidas do dia</span><span style="color:var(--red);">- ' + fmt(saidasHoje) + '</span></div>':'') +
-      // Saldo esperado
-      '<div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;font-size:13px;font-weight:700;">' +
-        '<span>Saldo esperado</span>' +
-        '<span style="color:var(--green);">' + fmt(saldoEsperado) + '</span>' +
-      '</div>' +
-      // Formulario de conferencia
-      '<div style="padding:14px;">' +
-        '<div style="font-size:11px;color:var(--text3);margin-bottom:10px;">Confira o que tem em maos e informe abaixo:</div>' +
-        '<div class="field"><label>💵 Dinheiro fisico em maos</label><input type="number" id="fechDinVal" placeholder="0.00" step="0.01" inputmode="decimal" oninput="calcDiferencaFechamento()"></div>' +
-        '<div class="field"><label>📦 Caixa fixo (fundo de troco)</label><input type="number" id="fechCfVal" placeholder="0.00" step="0.01" inputmode="decimal" value="' + (caixaFixoAtual.valor||'') + '" oninput="calcDiferencaFechamento()"></div>' +
-        '<div style="font-size:11px;color:var(--text3);margin-bottom:6px;">💳 Pix/Debito/Credito entram automaticamente via banco — nao precisa informar</div>' +
-        '<div id="fechamentoDiferenca" style="display:none;padding:10px;border-radius:var(--rsm);margin-bottom:10px;"></div>' +
-        '<div class="field"><label>Observacao</label><input type="text" id="fechObs" placeholder="Opcional"></div>' +
-        '<div class="msg" id="fechMsg"></div>' +
-        '<button class="btn btn-primary" onclick="salvarFechamento()">🔒 Fechar Caixa</button>' +
-      '</div>' +
-    '</div>';
-  }
-
-  // Historico de fechamentos
-  if (fechamentos.length > 0) {
-    html += '<div class="sec" style="margin-top:4px;">Historico de fechamentos</div>';
-    html += fechamentos.slice(0,5).map(function(f){
-      return '<div class="li" style="margin-bottom:6px;">' +
-        '<div class="li-info"><div class="li-title" style="font-size:12px;">' + f.data + '</div>' +
-        '<div class="li-sub">Em maos: ' + fmt(+f.valor_em_maos) + ' | CF: ' + fmt(+f.caixa_fixo) + (f.obs?' | '+f.obs:'') + '</div></div>' +
-        '<div style="text-align:right;"><div style="font-size:12px;font-weight:700;color:' + (Math.abs(+f.diferenca)<0.01?'var(--green)':+f.diferenca>0?'var(--green)':'var(--red)') + ';">' + fmtS(+f.diferenca) + '</div>' +
-        '<div style="font-size:10px;color:var(--text3);">diferenca</div></div>' +
-      '</div>';
-    }).join('');
-  }
-
-  return html;
-}
 function reabrirFechamento() {
   fechamentos = fechamentos.filter(function(f) { return f.data !== hoje(); });
   renderLancar();
@@ -1575,12 +1488,65 @@ function reabrirFechamento() {
 
 function renderGraficos() {
   document.getElementById('page-graficos').innerHTML =
+    '<div class="sec">Historico de meses fechados</div>' +
+    '<div id="historicoMensalBox"></div>' +
+    '<div class="divider"></div>' +
+    '<div class="sec">Mes atual (' + MES_ANO + ')</div>' +
     '<div class="chart-box"><div class="chart-title">Faturamento diario</div><div class="chart-wrap"><canvas id="cDiario"></canvas></div></div>' +
     '<div class="chart-box"><div class="chart-title">Faturamento vs Despesas (semanal)</div><div class="chart-wrap"><canvas id="cSemanas"></canvas></div></div>' +
     '<div class="chart-box"><div class="chart-title">Formas de pagamento</div><div class="chart-wrap" style="height:200px;"><canvas id="cPag"></canvas></div></div>' +
     '<div class="chart-box"><div class="chart-title">Evolucao do saldo</div><div class="chart-wrap"><canvas id="cSaldo"></canvas></div></div>' +
     '<div class="chart-box"><div class="chart-title">Faturamento anual 2026</div><div class="chart-wrap"><canvas id="cAnual"></canvas></div></div>';
   setTimeout(buildCharts, 100);
+  carregarHistoricoMensal();
+}
+
+async function carregarHistoricoMensal() {
+  var box = document.getElementById('historicoMensalBox');
+  if (!box) return;
+  box.innerHTML = '<div class="empty">Carregando...</div>';
+  try {
+    var meses = await sb('historico_mensal?user_id=eq.' + userId + '&order=mes_ano.desc');
+    if (!Array.isArray(meses) || meses.length === 0) {
+      box.innerHTML = '<div class="empty" style="margin-bottom:10px;">Nenhum mes fechado ainda. O historico aparece aqui automaticamente quando um novo mes comecar.</div>';
+      return;
+    }
+    box.innerHTML = meses.map(function(m) {
+      var label = new Date(m.mes_ano + '-01T12:00:00').toLocaleDateString('pt-BR', {month:'long', year:'numeric'});
+      return '<div class="li" style="cursor:pointer;" onclick="verDetalhesMes(&quot;' + m.mes_ano + '&quot;)">' +
+        '<div class="li-info"><div class="li-title" style="text-transform:capitalize;">' + label + '</div>' +
+        '<div class="li-sub">Faturamento: ' + fmt(m.faturamento_total) + ' | Saldo final: ' + fmtS(m.saldo_final) + '</div></div>' +
+        '<span class="badge bg-blue">ver</span>' +
+      '</div>';
+    }).join('');
+  } catch(e) {
+    box.innerHTML = '<div class="empty">Erro ao carregar historico.</div>';
+  }
+}
+
+function verDetalhesMes(mesAno) {
+  sb('historico_mensal?user_id=eq.' + userId + '&mes_ano=eq.' + mesAno).then(function(res) {
+    var m = Array.isArray(res) ? res[0] : null;
+    if (!m) return;
+    var label = new Date(mesAno + '-01T12:00:00').toLocaleDateString('pt-BR', {month:'long', year:'numeric'});
+    var html = '<div style="text-transform:capitalize;font-weight:700;margin-bottom:10px;">' + label + '</div>' +
+      [
+        ['Saldo inicial', fmt(m.saldo_inicial)],
+        ['Faturamento total', fmt(m.faturamento_total)],
+        ['  - Dinheiro', fmt(m.faturamento_dinheiro)],
+        ['  - Digital (Pix/Deb/Cred)', fmt(m.faturamento_pix)],
+        ['Despesas pagas', '-' + fmt(m.despesas_pagas)],
+        ['Reinvestimentos', '-' + fmt(m.reinvestimentos_total)],
+        ['Saidas', '-' + fmt(m.saidas_total)],
+        ['Aportes', '+' + fmt(m.aportes_total)],
+        ['Caixa fixo final', fmt(m.caixa_fixo_final)],
+        ['Saldo final', fmtS(m.saldo_final)]
+      ].map(function(r) {
+        return '<div style="display:flex;justify-content:space-between;font-size:12px;padding:6px 0;border-top:1px solid var(--border);"><span style="color:var(--text3);">' + r[0] + '</span><span>' + r[1] + '</span></div>';
+      }).join('');
+    document.getElementById('moVendaDetalheContent').innerHTML = html;
+    document.getElementById('moVendaDetalhe').classList.add('open');
+  });
 }
 
 function buildCharts() {
@@ -1617,14 +1583,13 @@ function buildCharts() {
   evs.sort(function(a,b) { return a.data.localeCompare(b.data); });
   evs.forEach(function(e) { se+=e.d; sl.push('D'+diaNum(e.data)); sd.push(Math.round(se*100)/100); });
   charts.saldo = new Chart(document.getElementById('cSaldo'), {type:'line', data:{labels:sl, datasets:[{data:sd, borderColor:'#60a5fa', backgroundColor:'rgba(96,165,250,0.06)', fill:true, tension:0.3, pointRadius:2, pointBackgroundColor:sd.map(function(v) { return v>=0?'#60a5fa':'#f87171'; })}, {data:Array(sl.length).fill(0), borderColor:'rgba(248,113,113,0.3)', borderDash:[4,3], pointRadius:0, fill:false}]}, options:Object.assign({}, co, {plugins:{legend:{display:false}, tooltip:{callbacks:{label:function(ctx) { return fmtS(ctx.raw); }}}}})}); 
-  // Faturamento anual: historico do banco + mes atual calculado
   var mi = new Date().getMonth();
   var fa = Array(12).fill(0);
   faturamentoHistorico.forEach(function(h) {
-    var mes = parseInt(h.mes_ano.split('-')[1]) - 1; // 0-indexed
+    var mes = parseInt(h.mes_ano.split('-')[1]) - 1;
     fa[mes] = +h.total || 0;
   });
-  fa[mi] = calcTotais().totalFat; // mes atual sempre do banco
+  fa[mi] = calcTotais().totalFat;
   charts.anual = new Chart(document.getElementById('cAnual'), {type:'bar', data:{labels:['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'], datasets:[{data:fa, backgroundColor:fa.map(function(v,i) { return i===mi?'rgba(74,222,128,0.8)':i<mi?'rgba(96,165,250,0.5)':'rgba(255,255,255,0.06)'; }), borderRadius:4}, {label:'Meta', data:Array(12).fill(perfil.meta_mensal||9500), type:'line', borderColor:'rgba(251,191,36,0.5)', borderDash:[5,4], borderWidth:1.5, pointRadius:0, fill:false}]}, options:Object.assign({}, co, {plugins:{legend:{display:false}, tooltip:{callbacks:{label:function(ctx) { return fmt(ctx.raw); }}}}})});
 }
 
@@ -1658,7 +1623,6 @@ function renderRelatorioDespesas() {
     '</div>' +
     '<div style="padding:8px 14px;">';
 
-  // Listar despesas por categoria
   var cats = {};
   desp.forEach(function(d) {
     if (!cats[d.cat]) cats[d.cat] = {total:0, pago:0};
@@ -1682,35 +1646,29 @@ function renderRelatorioDespesas() {
 function exportarCSV() {
   var linhas = [['Tipo','Data','Descricao','Dinheiro','Pix','Debito','Credito','Total','Forma Pagamento']];
 
-  // Lançamentos manuais
   lancamentos.forEach(function(l) {
     var total = (+l.dinheiro||0)+(+l.pix||0)+(+l.debito||0)+(+l.credito||0);
     linhas.push(['Lancamento manual', l.data, 'Entrada do dia', +l.dinheiro||0, +l.pix||0, +l.debito||0, +l.credito||0, total, '']);
   });
 
-  // Vendas PDV
   vendas.forEach(function(v) {
     linhas.push(['Venda PDV', v.data || v.created_at.split('T')[0], v.obs||'Venda PDV', '', '', '', '', +v.total_final||0, v.forma_pagamento]);
   });
 
-  // Saídas
   saidas.forEach(function(s) {
     linhas.push(['Saida', s.data, s.descricao, '', '', '', '', -(+s.valor||0), s.categoria]);
   });
 
-  // Reinvestimentos
   reinvestimentos.forEach(function(r) {
     linhas.push(['Reinvestimento', r.data, r.descricao||r.tipo, '', '', '', '', -(+r.valor||0), r.tipo]);
   });
 
-  // Despesas pagas
   getDespesas().forEach(function(d) {
     if (pagamentos[d.dia+'-'+d.desc]) {
       linhas.push(['Despesa paga', MES_ANO+'-'+String(d.dia).padStart(2,'0'), d.desc, '', '', '', '', -(+d.val||0), d.cat]);
     }
   });
 
-  // Aportes
   aportes.forEach(function(a) {
     linhas.push(['Aporte pessoal', a.data, a.descricao||'Aporte', '', '', '', '', +a.valor||0, '']);
   });
@@ -1764,7 +1722,8 @@ function renderConfig() {
     '<div class="sec">Despesas fixas <button class="btn btn-sm btn-green-sm" onclick="abrirConfigModal(&quot;novaDesp&quot;)">+ Nova</button></div>' +
     despHtml +
     '<div class="divider"></div>' +
-    '<div class="sec">Resumo do mes</div>' +
+    '<div class="sec">Resumo do mes <button class="btn btn-sm btn-blue-sm" onclick="exportarCSV()">⬇ Exportar CSV</button></div>' +
+    renderRelatorioDespesas() +
     '<div class="card full">' + resumoRows.map(function(r, i) { return '<div style="display:flex;justify-content:space-between;font-size:11px;padding:5px 0;' + (i > 0 ? 'border-top:1px solid var(--border)' : '') + '"><span style="color:var(--text3);">' + r[0] + '</span><span style="color:' + r[2] + ';">' + r[1] + '</span></div>'; }).join('') + '</div>';
 }
 
@@ -1899,24 +1858,18 @@ async function salvarLanc() {
   var ex = lancamentos.find(function(l) { return editId ? l.id === editId : l.data === data; });
   var lanc;
   if (ex && editId) {
-    // Modo edição: substituir valores completamente
     lanc = {id:ex.id, data:data, dinheiro:din, pix:pix, debito:deb, credito:cred+outrosVal, mes_ano:MES_ANO, user_id:userId};
   } else if (ex) {
-    // Mesmo dia sem edição: somar ao existente
     lanc = {id:ex.id, data:data, dinheiro:(+ex.dinheiro||0)+din, pix:(+ex.pix||0)+pix, debito:(+ex.debito||0)+deb, credito:(+ex.credito||0)+cred+outrosVal, mes_ano:MES_ANO, user_id:userId};
   } else {
-    // Novo lançamento
     lanc = {data:data, dinheiro:din, pix:pix, debito:deb, credito:cred+outrosVal, mes_ano:MES_ANO, user_id:userId};
   }
   showMsg('lancMsg', 'Salvando...', 'warn');
   try {
     await sb('lancamentos', {method:'POST', headers:{'Prefer':'resolution=merge-duplicates,return=representation'}, body:JSON.stringify(lanc)});
-    // Se tiver valor em outros, registrar como observacao no lancamento
     if (outrosVal > 0) {
-      // Salvar descricao do outros no obs do lancamento
       await sb('lancamentos?id=eq.' + (ex ? ex.id : ''), {method:'PATCH', body:JSON.stringify({obs: outrosDesc + ': R$ ' + outrosVal.toFixed(2)})}).catch(function(){});
     }
-    // Atualizar caixa fixo e fechar caixa do dia
     var cfVal = parseFloat(document.getElementById('lancCaixaFixo') ? document.getElementById('lancCaixaFixo').value : 0) || 0;
     if (cfVal > 0) {
       var existeCf = await sb('caixa_fixo?data=eq.' + data + '&user_id=eq.' + userId);
@@ -1927,7 +1880,6 @@ async function salvarLanc() {
       }
       caixaFixoAtual = {valor:cfVal, data:data};
     }
-    // Registrar retirada para guarda pessoal, se informado
     var retiradaVal = parseFloat(document.getElementById('lancRetiradaVal') ? document.getElementById('lancRetiradaVal').value : 0) || 0;
     if (retiradaVal > 0) {
       var retiradaDesc = (document.getElementById('lancRetiradaDesc') ? document.getElementById('lancRetiradaDesc').value.trim() : '') || 'Retirada para guarda';
@@ -1936,19 +1888,16 @@ async function salvarLanc() {
       })});
       if (Array.isArray(resRet) && resRet[0]) retiradasGuarda.unshift(resRet[0]);
     }
-    // Fechar caixa do dia se for hoje
     if (data === hoje() && caixaAberto) {
       await sb('abertura_caixa?user_id=eq.' + userId + '&data=eq.' + data, {method:'PATCH', body:JSON.stringify({status:'fechado'})}).catch(function(){});
       caixaAberto = null;
     }
     showMsg('lancMsg', 'Salvo!', 'ok');
     await carregarDados();
-    // Limpar campos outros
     if (document.getElementById('lancOutrosDesc')) document.getElementById('lancOutrosDesc').value = '';
     if (document.getElementById('lancOutrosVal')) document.getElementById('lancOutrosVal').value = '';
     if (document.getElementById('lancRetiradaVal')) document.getElementById('lancRetiradaVal').value = '';
     if (document.getElementById('lancRetiradaDesc')) document.getElementById('lancRetiradaDesc').value = '';
-    // Resetar botão se estava em modo edição
     var btn = document.querySelector('#page-lancar .btn-primary');
     if (btn) { btn.textContent = '✓ Registrar e fechar caixa do dia'; btn.style.background = ''; }
     if (document.getElementById('lancData')) delete document.getElementById('lancData').dataset.editId;
@@ -1958,9 +1907,7 @@ async function salvarLanc() {
 function abrirEditLanc(id) {
   var l = lancamentos.find(function(x) { return x.id === id; });
   if (!l) return;
-  // Preencher campos da entrada manual com os dados do lançamento
   showPage('lancar', document.querySelectorAll('.nav-btn')[2]);
-  // Aguardar render da aba e preencher campos
   setTimeout(function() {
     var dataEl = document.getElementById('lancData');
     var dinEl = document.getElementById('lancDin');
@@ -1973,16 +1920,13 @@ function abrirEditLanc(id) {
     if (debEl) debEl.value = +l.debito || 0;
     if (credEl) credEl.value = +l.credito || 0;
     if (dataEl) dataEl.dataset.editId = id;
-    // Destacar visualmente que está em modo edição
     var btn = document.querySelector('#page-lancar .btn-primary');
     if (btn) {
       btn.textContent = 'Salvar alteração';
       btn.style.background = 'var(--yellow)';
     }
-    // Scroll para o topo
     document.getElementById('page-lancar').scrollTop = 0;
     window.scrollTo(0, 0);
-    // Mostrar alerta de edição
     var msg = document.getElementById('lancMsg');
     if (msg) {
       msg.textContent = '✏️ Editando lançamento de ' + new Date(l.data + 'T12:00:00').toLocaleDateString("pt-BR", {weekday:"long", day:"2-digit", month:"2-digit"});
@@ -2167,7 +2111,6 @@ function calcDiferencaFechamento() {
   var din = parseFloat(document.getElementById('fechDinVal') ? document.getElementById('fechDinVal').value : 0) || 0;
   var cf = parseFloat(document.getElementById('fechCfVal') ? document.getElementById('fechCfVal').value : 0) || 0;
   if (din + cf <= 0) { var el2 = document.getElementById('fechamentoDiferenca'); if(el2) el2.style.display = 'none'; return; }
-  // Calcular digital automaticamente (Pix + Debito + Credito de hoje)
   var lancHoje2 = lancamentos.find(function(l) { return l.data === hoje(); });
   var vendasHoje2 = vendas.filter(function(v) { return v.data === hoje(); });
   var digitalHoje = (lancHoje2 ? (+lancHoje2.pix||0)+(+lancHoje2.debito||0)+(+lancHoje2.credito||0) : 0) +
@@ -2194,7 +2137,6 @@ async function salvarFechamento() {
   var cf = parseFloat(document.getElementById('fechCfVal') ? document.getElementById('fechCfVal').value : 0) || 0;
   var obs = document.getElementById('fechObs') ? document.getElementById('fechObs').value.trim() : '';
   if (din <= 0 && cf <= 0) { showMsg('fechMsg', 'Informe o dinheiro em maos.', 'err'); return; }
-  // Digital calculado automaticamente
   var lancHoje3 = lancamentos.find(function(l) { return l.data === hoje(); });
   var vendasHoje3 = vendas.filter(function(v) { return v.data === hoje(); });
   var digitalHoje2 = (lancHoje3 ? (+lancHoje3.pix||0)+(+lancHoje3.debito||0)+(+lancHoje3.credito||0) : 0) +
@@ -2204,13 +2146,12 @@ async function salvarFechamento() {
   var diferenca = (totalEmMaos + cf) - t.saldoTotal;
   showMsg('fechMsg', 'Salvando...', 'warn');
   try {
-    // Salvar fechamento
+    var conta = digitalHoje2;
     await sb('fechamento_caixa', {method:'POST', headers:{'Prefer':'resolution=merge-duplicates,return=representation'}, body:JSON.stringify({
       user_id:userId, data:hoje(), mes_ano:MES_ANO,
       valor_em_maos:totalEmMaos, caixa_fixo:cf, valor_conta:conta,
       saldo_sistema:t.saldoTotal, diferenca:diferenca, obs:obs
     })});
-    // Atualizar caixa fixo se mudou
     if (cf !== caixaFixoAtual.valor) {
       var existeCf = await sb('caixa_fixo?data=eq.' + hoje() + '&user_id=eq.' + userId);
       if (existeCf && existeCf.length > 0) {
@@ -2220,7 +2161,6 @@ async function salvarFechamento() {
       }
       caixaFixoAtual = {valor:cf, data:hoje()};
     }
-    // Diferenca registrada apenas para controle - nao ajusta saldo automaticamente
     showMsg('fechMsg', 'Caixa fechado!', 'ok');
     setTimeout(function() { fecharMo('moFechamento'); carregarDados(); }, 800);
   } catch(e) { showMsg('fechMsg', 'Erro: ' + e.message, 'err'); }
@@ -2270,7 +2210,6 @@ async function togglePago(dia, desc) {
   pagamentos[key] = nv;
   try {
     if (nv) {
-      // Marcar como pago — congelar o valor vigente nesse mes
       var desp = getDespesas().find(function(d) { return String(d.dia) === String(dia) && d.desc === desc; });
       var valorCongelado = desp ? desp.val : null;
       pagamentosValores[key] = valorCongelado;
@@ -2359,7 +2298,6 @@ async function salvarSaldoInicial() {
   var obs = document.getElementById('siO').value.trim();
   var novo = {valor:valor, data:data, obs:obs};
   try {
-    // Tentar UPDATE primeiro, se não existir faz INSERT
     var existe = await sb('configuracoes?chave=eq.saldo_inicial&user_id=eq.' + userId);
     if (existe && existe.length > 0) {
       await sb('configuracoes?chave=eq.saldo_inicial&user_id=eq.' + userId, {method:'PATCH', body:JSON.stringify({valor:JSON.stringify(novo)})});
@@ -2376,7 +2314,6 @@ async function salvarCaixaFixo() {
   var valor = parseFloat(document.getElementById('cfV').value) || 0;
   var data = document.getElementById('cfD').value || hoje();
   try {
-    // Verificar se já existe registro para essa data e user
     var existe = await sb('caixa_fixo?data=eq.' + data + '&user_id=eq.' + userId);
     if (existe && existe.length > 0) {
       await sb('caixa_fixo?data=eq.' + data + '&user_id=eq.' + userId, {method:'PATCH', body:JSON.stringify({valor:valor})});
@@ -2425,8 +2362,6 @@ async function excluirFornecedor(id) {
   await sb('fornecedores?id=eq.' + id, {method:'DELETE'});
   fornecedores = fornecedores.filter(function(f) { return f.id !== id; });
   renderAll();
-  verificarMesAnterior();
-  verificarAberturaCaixa();
 }
 
 async function excluirDesp(idx, descNome) {
@@ -2452,7 +2387,6 @@ async function salvarDesp(idx) {
   if (idx !== null && idx !== undefined) {
     var d = getDespesas()[idx];
     if (d && d.id && +d.val !== valor) {
-      // Valor mudou - perguntar a partir de quando vale
       abrirVigenciaModal(d.id, descricao, valor, dia, sem, cat);
       return;
     }
@@ -2495,13 +2429,10 @@ function abrirVigenciaModal(despesaId, descricao, novoValor, dia, sem, cat) {
 
 async function confirmarVigencia(despesaId, novoValor, descricao, dia, sem, cat, mesAnoInicio) {
   try {
-    // Atualizar dados gerais (dia, sem, cat, descricao) sempre
     await sb('despesas_fixas?id=eq.' + despesaId, {method:'PATCH', body:JSON.stringify({descricao:descricao, dia:dia, sem:sem, cat:cat, valor:novoValor})});
-    // Registrar o novo valor de vigencia a partir do mes escolhido
     await sb('despesas_fixas_valores?on_conflict=despesa_id,mes_ano_inicio', {method:'POST', headers:{'Prefer':'resolution=merge-duplicates,return=representation'}, body:JSON.stringify({
       user_id:userId, despesa_id:despesaId, valor:novoValor, mes_ano_inicio:mesAnoInicio
     })});
-    // Se a vigencia escolhida for o mes atual ou anterior, atualiza em memoria para refletir agora
     if (mesAnoInicio <= MES_ANO) {
       despesasFixas = despesasFixas.map(function(x) { return x.id === despesaId ? Object.assign({}, x, {desc:descricao, val:novoValor, dia:dia, sem:sem, cat:cat}) : x; });
     } else {
