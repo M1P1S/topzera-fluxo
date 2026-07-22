@@ -1044,10 +1044,9 @@ function renderDashboard() {
   }).join('');
   document.getElementById('page-dashboard').innerHTML =
     '<div class="card-grid">' +
-    '<div class="card ' + (t.saldoTotal >= 500 ? 'green' : t.saldoTotal >= 0 ? 'yellow' : 'red') + '"><div class="cl">Saldo total</div><div class="cv">' + fmtS(t.saldoTotal) + '</div><div class="cs">conta + caixa fixo</div></div>' +
+    '<div class="card ' + (t.saldoTotal >= 500 ? 'green' : t.saldoTotal >= 0 ? 'yellow' : 'red') + '"><div class="cl">Saldo total</div><div class="cv">' + fmtS(t.saldoTotal) + '</div><div class="cs">Inclui caixa fixo (' + fmt(caixaFixoAtual.valor) + ') <button class="btn btn-sm btn-blue-sm" style="margin-left:4px;" onclick="abrirConfigModal(&quot;caixaFixo&quot;)">atualizar</button></div></div>' +
     '<div class="card blue"><div class="cl">Faturamento</div><div class="cv">' + fmt(t.totalFat) + '</div><div class="cs">' + Math.round(pctMes) + '% da meta</div></div>' +
-    '<div class="card yellow"><div class="cl">Reinvestir</div><div class="cv">' + fmt(t.totalReinvest) + '</div><div class="cs">Usado: ' + fmt(t.totalReinvestUsado) + ' | Saldo: ' + fmt(Math.max(0, t.totalReinvest - t.totalReinvestUsado)) + '</div></div>' +
-    '<div class="card purple"><div class="cl">Caixa fixo</div><div class="cv">' + fmt(caixaFixoAtual.valor) + '</div><div class="cs"><button class="btn btn-sm btn-blue-sm" onclick="abrirConfigModal(&quot;caixaFixo&quot;)">Atualizar</button></div></div>' +
+    '<div class="card yellow"><div class="cl">Reinvestir</div><div class="cv">' + fmt(Math.max(0, t.totalReinvest - t.totalReinvestUsado)) + '</div><div class="cs">Disponivel de ' + fmt(t.totalReinvest) + ' (ja usou ' + fmt(t.totalReinvestUsado) + ')</div></div>' +
     '</div>' +
     (t.totalGuardado !== 0 ? '<div class="card-grid" style="margin-top:8px;"><div class="card" style="border-color:#0ea5e9;"><div class="cl">💰 Guardado fora do caixa</div><div class="cv" style="color:#0ea5e9;">' + fmt(t.totalGuardado) + '</div><div class="cs">Ja incluso no saldo total - so mostra onde esta fisicamente</div></div></div>' : '') +
     alertas +
@@ -1898,7 +1897,7 @@ async function salvarLanc() {
       await sb('lancamentos?id=eq.' + (ex ? ex.id : ''), {method:'PATCH', body:JSON.stringify({obs: outrosDesc + ': R$ ' + outrosVal.toFixed(2)})}).catch(function(){});
     }
     var cfVal = parseFloat(document.getElementById('lancCaixaFixo') ? document.getElementById('lancCaixaFixo').value : 0) || 0;
-    if (cfVal > 0) {
+    if (cfVal > 0 && cfVal !== caixaFixoAtual.valor) {
       var existeCf = await sb('caixa_fixo?data=eq.' + data + '&user_id=eq.' + userId);
       if (existeCf && existeCf.length > 0) {
         await sb('caixa_fixo?data=eq.' + data + '&user_id=eq.' + userId, {method:'PATCH', body:JSON.stringify({valor:cfVal})});
