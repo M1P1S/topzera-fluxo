@@ -629,6 +629,16 @@ async function fecharMesAnterior(mesAnoFechado) {
   } catch(e) { console.error('Erro ao fechar mes anterior:', e); }
 }
 
+async function fecharMesManual() {
+  if (!confirm('Fechar o mes ' + MES_ANO + ' agora e salvar o resumo no historico?')) return;
+  try {
+    await fecharMesAnterior(MES_ANO);
+    alert('Mes ' + MES_ANO + ' fechado e salvo no historico!');
+  } catch(e) {
+    alert('Erro ao fechar o mes: ' + e.message);
+  }
+}
+
 function verificarAberturaCaixa() {
   if (!caixaAberto) {
     var fechHoje = fechamentos.find(function(f) { return f.data === hoje(); });
@@ -844,6 +854,9 @@ function calcTotais() {
   var fatPlat = receitas.reduce(function(a, r) { return a + (+r.valor || 0); }, 0);
   var totalAportes = aportes.reduce(function(a, ap) { return a + (+ap.valor || 0); }, 0);
   var totalRendimentos = rendimentos.reduce(function(a, r) { return a + (+r.valor || 0); }, 0);
+  // "Guardado fora do caixa" é dinheiro que já entrou como venda (dinheiro do dia) e só mudou de
+  // lugar fisicamente. Por isso ele NÃO soma nem subtrai do saldo total — é puramente informativo,
+  // pra você saber que uma parte do saldo está fisicamente fora da gaveta/conta.
   var totalGuardado = retiradasGuarda.reduce(function(a, r) {
     return a + (r.tipo === 'devolucao' ? -(+r.valor||0) : (+r.valor||0));
   }, 0);
@@ -857,8 +870,13 @@ function calcTotais() {
     return a + (vp != null ? vp : d.val);
   }, 0);
   var totalSaidas = saidas.reduce(function(a, s) { return a + (+s.valor || 0); }, 0);
+  // Saldo Conta = tudo que entrou (vendas, receitas externas, aportes, rendimentos) menos tudo que
+  // saiu (despesas pagas, saídas variáveis). Já inclui o dinheiro guardado fora do caixa, porque
+  // esse dinheiro nunca deixou de ser "seu" — só mudou de lugar fisicamente.
   var saldoConta = saldoInicial.valor + totalLiquido + fatPlat + totalAportes + totalRendimentos - totalDespPagas - totalSaidas;
-  var saldoTotal = saldoConta + caixaFixoAtual.valor + totalGuardado;
+  // Saldo Total = Saldo Conta + Caixa Fixo (fundo de troco físico na gaveta, capital à parte,
+  // nunca contado como venda). O "guardado fora do caixa" NÃO entra aqui de novo.
+  var saldoTotal = saldoConta + caixaFixoAtual.valor;
   var metaMes = perfil.meta_mensal || 9500;
   return {fatVendas:fatVendas, fatPDV:fatPDV, pdvDinheiro:pdvDinheiro, pdvPix:pdvPix, pdvDebito:pdvDebito, pdvCredito:pdvCredito, pdvOutros:pdvOutros, fatDinheiro:fatDinheiro, fatConta:fatConta, totalDinheiro:totalDinheiro, totalConta:totalConta, totalAportes:totalAportes, totalRendimentos:totalRendimentos, totalGuardado:totalGuardado, fatPlat:fatPlat, totalFat:totalFat, totalReinvest:totalReinvest, totalReinvestUsado:totalReinvestUsado, totalLiquido:totalLiquido, totalDespPagas:totalDespPagas, totalSaidas:totalSaidas, saldoConta:saldoConta, saldoTotal:saldoTotal, metaMes:metaMes};
 }
@@ -1031,7 +1049,7 @@ function renderDashboard() {
     '<div class="card yellow"><div class="cl">Reinvestir</div><div class="cv">' + fmt(t.totalReinvest) + '</div><div class="cs">Usado: ' + fmt(t.totalReinvestUsado) + ' | Saldo: ' + fmt(Math.max(0, t.totalReinvest - t.totalReinvestUsado)) + '</div></div>' +
     '<div class="card purple"><div class="cl">Caixa fixo</div><div class="cv">' + fmt(caixaFixoAtual.valor) + '</div><div class="cs"><button class="btn btn-sm btn-blue-sm" onclick="abrirConfigModal(&quot;caixaFixo&quot;)">Atualizar</button></div></div>' +
     '</div>' +
-    (t.totalGuardado !== 0 ? '<div class="card-grid" style="margin-top:8px;"><div class="card" style="border-color:#0ea5e9;"><div class="cl">💰 Guardado fora do caixa</div><div class="cv" style="color:#0ea5e9;">' + fmt(t.totalGuardado) + '</div><div class="cs">Dinheiro retirado e guardado em maos</div></div></div>' : '') +
+    (t.totalGuardado !== 0 ? '<div class="card-grid" style="margin-top:8px;"><div class="card" style="border-color:#0ea5e9;"><div class="cl">💰 Guardado fora do caixa</div><div class="cv" style="color:#0ea5e9;">' + fmt(t.totalGuardado) + '</div><div class="cs">Ja incluso no saldo total - so mostra onde esta fisicamente</div></div></div>' : '') +
     alertas +
     '<div class="sec">Meta de hoje</div>' +
     '<div class="pw"><div class="pr"><span>' + fmt(fh) + '</span><span>Meta: R$ 365</span></div><div class="pb"><div class="pf" style="width:' + pctHoje + '%;background:' + (fh >= 365 ? 'var(--green)' : fh >= 200 ? 'var(--yellow)' : 'var(--red)') + ';"></div></div></div>' +
@@ -1136,8 +1154,11 @@ function calcDifPDV() {
   var digital = vendasHoje.filter(function(v){return v.forma_pagamento!=='dinheiro';}).reduce(function(a,v){return a+(+v.total_final||0);},0) +
     (lancHoje?(+lancHoje.pix||0)+(+lancHoje.debito||0)+(+lancHoje.credito||0):0);
   var totalInf = din + cf + digital;
-  var t = calcTotais();
-  var dif = totalInf - t.saldoTotal;
+  var pdvDinheiroHojeC = vendasHoje.filter(function(v){return v.forma_pagamento==='dinheiro';}).reduce(function(a,v){return a+(+v.total_final||0);},0);
+  var dinheiroHojeC = (lancHoje ? (+lancHoje.dinheiro||0) : 0) + pdvDinheiroHojeC;
+  var saidasHojePdv = saidas.filter(function(s){return s.data===hoje();}).reduce(function(a,s){return a+(+s.valor||0);},0);
+  var esperadoHojePdv = caixaFixoAtual.valor + digital + dinheiroHojeC - saidasHojePdv;
+  var dif = totalInf - esperadoHojePdv;
   var el = document.getElementById('pdvDifDiv');
   if (!el) return;
   el.style.display='block';
@@ -1157,7 +1178,11 @@ async function fecharCaixaPDV() {
     (lancHoje?(+lancHoje.pix||0)+(+lancHoje.debito||0)+(+lancHoje.credito||0):0);
   var totalEmMaos = din + digital;
   var t = calcTotais();
-  var dif = (totalEmMaos + cf) - t.saldoTotal;
+  var pdvDinheiroHojeC2 = vendasHoje.filter(function(v){return v.forma_pagamento==='dinheiro';}).reduce(function(a,v){return a+(+v.total_final||0);},0);
+  var dinheiroHojeC2 = (lancHoje ? (+lancHoje.dinheiro||0) : 0) + pdvDinheiroHojeC2;
+  var saidasHojePdv2 = saidas.filter(function(s){return s.data===hoje();}).reduce(function(a,s){return a+(+s.valor||0);},0);
+  var esperadoHojePdv2 = caixaFixoAtual.valor + digital + dinheiroHojeC2 - saidasHojePdv2;
+  var dif = (totalEmMaos + cf) - esperadoHojePdv2;
   showMsg('pdvFechMsg','Fechando...','warn');
   try {
     await sb('fechamento_caixa',{method:'POST',headers:{'Prefer':'resolution=merge-duplicates,return=representation'},body:JSON.stringify({
@@ -1436,7 +1461,7 @@ function renderRetiradasGuarda() {
     '<div style="display:flex;justify-content:space-between;font-size:13px;font-weight:700;">' +
       '<span>Total guardado</span><span style="color:#0ea5e9;">' + fmt(t.totalGuardado) + '</span>' +
     '</div>' +
-    '<div style="font-size:10px;color:var(--text3);margin-top:4px;">Esse valor soma ao Saldo Total no Dashboard.</div>' +
+    '<div style="font-size:10px;color:var(--text3);margin-top:4px;">Esse valor ja esta incluido no Saldo Total (nao muda o total, so mostra onde parte do dinheiro esta fisicamente).</div>' +
   '</div>';
 
   if (retiradasGuarda.length === 0) {
@@ -1713,6 +1738,8 @@ function renderConfig() {
     '<div class="li" style="margin-bottom:12px;"><div class="li-info"><div class="li-title">' + fmt(saldoInicial.valor) + '</div><div class="li-sub">' + saldoInicial.data + ' - ' + (saldoInicial.obs || 'Saldo inicial') + '</div></div></div>' +
     '<div class="sec">Caixa fixo <button class="btn btn-sm btn-blue-sm" onclick="abrirConfigModal(&quot;caixaFixo&quot;)">atualizar</button></div>' +
     '<div class="li" style="margin-bottom:12px;"><div class="li-info"><div class="li-title" style="color:var(--purple);">' + fmt(caixaFixoAtual.valor) + '</div><div class="li-sub">Fundo de troco - ' + (caixaFixoAtual.data || hoje()) + '</div></div></div>' +
+    '<div class="sec">Fechar mes ' + MES_ANO + ' <button class="btn btn-sm btn-yellow-sm" onclick="fecharMesManual()">Fechar mes agora</button></div>' +
+    '<div class="li" style="margin-bottom:12px;"><div class="li-info"><div class="li-sub">Salva o resumo do mes atual no historico. Use no ultimo dia do mes ou quando quiser garantir que o fechamento foi salvo (nao depende so do navegador).</div></div></div>' +
     '<div class="sec">Produtos <button class="btn btn-sm btn-green-sm" onclick="abrirNovoProduto()">+ Novo</button></div>' +
     renderListaProdutosHtml() +
     '<div class="sec">Categorias <button class="btn btn-sm btn-green-sm" onclick="abrirConfigModal(&quot;novaCategoria&quot;)">+ Nova</button></div>' +
@@ -2116,8 +2143,11 @@ function calcDiferencaFechamento() {
   var digitalHoje = (lancHoje2 ? (+lancHoje2.pix||0)+(+lancHoje2.debito||0)+(+lancHoje2.credito||0) : 0) +
     vendasHoje2.filter(function(v){return v.forma_pagamento!=='dinheiro';}).reduce(function(a,v){return a+(+v.total_final||0);},0);
   var totalInformado = din + cf + digitalHoje;
-  var t = calcTotais();
-  var diferenca = totalInformado - t.saldoTotal;
+  var pdvDinheiroHoje = vendasHoje2.filter(function(v){return v.forma_pagamento==='dinheiro';}).reduce(function(a,v){return a+(+v.total_final||0);},0);
+  var dinheiroHoje = (lancHoje2 ? (+lancHoje2.dinheiro||0) : 0) + pdvDinheiroHoje;
+  var saidasHojeCalc = saidas.filter(function(s) { return s.data === hoje(); }).reduce(function(a, s) { return a + (+s.valor || 0); }, 0);
+  var esperadoHoje = caixaFixoAtual.valor + digitalHoje + dinheiroHoje - saidasHojeCalc;
+  var diferenca = totalInformado - esperadoHoje;
   var el = document.getElementById('fechamentoDiferenca');
   el.style.display = 'block';
   el.style.background = Math.abs(diferenca) < 1 ? 'var(--green-bg)' : 'var(--yellow-bg)';
@@ -2125,7 +2155,7 @@ function calcDiferencaFechamento() {
   el.innerHTML =
     '<div style="font-size:11px;margin-bottom:4px;">' +
     'Total informado: <strong>' + fmt(totalInformado) + '</strong> | ' +
-    'Sistema: <strong>' + fmtS(t.saldoTotal) + '</strong>' +
+    'Esperado hoje: <strong>' + fmtS(esperadoHoje) + '</strong>' +
     '</div>' +
     '<div style="font-size:13px;font-weight:700;color:' + (Math.abs(diferenca) < 1 ? 'var(--green)' : diferenca > 0 ? 'var(--green)' : 'var(--red)') + ';">' +
     (Math.abs(diferenca) < 1 ? '✓ Caixa fechado corretamente!' : 'Diferenca: ' + fmtS(diferenca)) +
@@ -2143,7 +2173,11 @@ async function salvarFechamento() {
     vendasHoje3.filter(function(v){return v.forma_pagamento!=='dinheiro';}).reduce(function(a,v){return a+(+v.total_final||0);},0);
   var totalEmMaos = din + digitalHoje2;
   var t = calcTotais();
-  var diferenca = (totalEmMaos + cf) - t.saldoTotal;
+  var pdvDinheiroHoje2 = vendasHoje3.filter(function(v){return v.forma_pagamento==='dinheiro';}).reduce(function(a,v){return a+(+v.total_final||0);},0);
+  var dinheiroHoje2 = (lancHoje3 ? (+lancHoje3.dinheiro||0) : 0) + pdvDinheiroHoje2;
+  var saidasHojeCalc2 = saidas.filter(function(s) { return s.data === hoje(); }).reduce(function(a, s) { return a + (+s.valor || 0); }, 0);
+  var esperadoHoje2 = caixaFixoAtual.valor + digitalHoje2 + dinheiroHoje2 - saidasHojeCalc2;
+  var diferenca = (totalEmMaos + cf) - esperadoHoje2;
   showMsg('fechMsg', 'Salvando...', 'warn');
   try {
     var conta = digitalHoje2;
