@@ -711,6 +711,8 @@ let saldoInicial = {valor:0, data:new Date().toISOString().split('T')[0], obs:''
 let caixaFixoAtual = {valor:0, data:new Date().toISOString().split('T')[0]};
 let despesasExtra = [];
 let carrinho = [];
+let vendaEditandoId = null;
+let vendaEditandoItensOriginais = {};
 let editProdId = null, ajusteEstoqueProdId = null;
 let charts = {};
 
@@ -1213,16 +1215,31 @@ function filtrarProdutosPDV() {
   }).join('') || '<div style="grid-column:1/-1;" class="empty">Nenhum produto.</div>';
 }
 
+function estoqueDisponivelPDV(prodId) {
+  var p = produtos.find(function(x) { return x.id === prodId; });
+  if (!p) return 0;
+  // Se estiver editando uma venda, os itens dela ainda nao foram devolvidos ao estoque
+  // (so serao devolvidos quando a edicao for confirmada), entao contam como disponiveis aqui.
+  return (+p.estoque_atual || 0) + (vendaEditandoItensOriginais[prodId] || 0);
+}
+
 function addCarrinho(prodId) {
   var p = produtos.find(function(x) { return x.id === prodId; });
   if (!p) return;
   var idx = carrinho.findIndex(function(i) { return i.prodId === prodId; });
+  var qtdAtual = idx >= 0 ? carrinho[idx].qtd : 0;
+  var disponivel = estoqueDisponivelPDV(prodId);
+  if (qtdAtual + 1 > disponivel) { alert('Estoque insuficiente. Disponivel: ' + disponivel + ' ' + (p.unidade || 'un')); return; }
   if (idx >= 0) { carrinho[idx].qtd++; }
   else { carrinho.push({prodId:prodId, nome:p.nome, preco:+p.preco_venda, unidade:p.unidade || 'un', qtd:1, custoUnit:+p.preco_custo || 0}); }
   renderPDV();
 }
 
 function alterarQtdCarrinho(idx, delta) {
+  if (delta > 0) {
+    var disponivel = estoqueDisponivelPDV(carrinho[idx].prodId);
+    if (carrinho[idx].qtd + delta > disponivel) { alert('Estoque insuficiente. Disponivel: ' + disponivel + ' ' + (carrinho[idx].unidade || 'un')); return; }
+  }
   carrinho[idx].qtd += delta;
   if (carrinho[idx].qtd <= 0) carrinho.splice(idx, 1);
   renderPDV();
@@ -1231,13 +1248,14 @@ function alterarQtdCarrinho(idx, delta) {
 function limparCarrinho() {
   if (carrinho.length === 0) return;
   if (!confirm('Cancelar a venda e limpar o carrinho?')) return;
-  carrinho = []; renderPDV();
+  carrinho = []; vendaEditandoId = null; vendaEditandoItensOriginais = {}; renderPDV();
 }
 
-function abrirPagamento() {
+function abrirPagamento(descontoPrefill) {
   var total = carrinho.reduce(function(a, i) { return a + i.preco * i.qtd; }, 0);
-  document.getElementById('pdvTotalFinal').textContent = fmt(total);
-  document.getElementById('pdvDesconto').value = '';
+  var desc = descontoPrefill || 0;
+  document.getElementById('pdvTotalFinal').textContent = fmt(Math.max(0, total - desc));
+  document.getElementById('pdvDesconto').value = desc || '';
   document.getElementById('pdvObs').value = '';
   document.getElementById('msgPdv').textContent = '';
   document.getElementById('moPdvPagamento').classList.add('open');
@@ -1257,6 +1275,24 @@ async function finalizarVenda() {
   var obs = document.getElementById('pdvObs').value.trim();
   showMsg('msgPdv', 'Registrando...', 'warn');
   try {
+    // Se estiver editando uma venda existente, só agora (que o usuario confirmou) apagamos a
+    // venda antiga e devolvemos o estoque dela. Se der erro antes disso, a venda original
+    // continua intacta e nada se perde.
+    if (vendaEditandoId) {
+      var itensAntigos = await sb('venda_itens?venda_id=eq.' + vendaEditandoId + '&order=created_at.asc');
+      for (var k = 0; k < itensAntigos.length; k++) {
+        var itemAntigo = itensAntigos[k];
+        var prodAntigo = produtos.find(function(p) { return p.id === itemAntigo.produto_id; });
+        if (prodAntigo) {
+          var estRestaurado = (+prodAntigo.estoque_atual || 0) + (+itemAntigo.quantidade || 0);
+          await sb('produtos?id=eq.' + itemAntigo.produto_id, {method:'PATCH', body:JSON.stringify({estoque_atual:estRestaurado})});
+          prodAntigo.estoque_atual = estRestaurado;
+        }
+      }
+      await sb('venda_itens?venda_id=eq.' + vendaEditandoId, {method:'DELETE'});
+      await sb('vendas?id=eq.' + vendaEditandoId, {method:'DELETE'});
+      vendas = vendas.filter(function(v) { return v.id !== vendaEditandoId; });
+    }
     var vendaRes = await sb('vendas', {method:'POST', headers:{'Prefer':'return=representation'}, body:JSON.stringify({user_id:userId, data:hoje(), mes_ano:MES_ANO, total:total, desconto:desc, total_final:totalFinal, forma_pagamento:forma, obs:obs, status:'concluida'})});
     var venda = Array.isArray(vendaRes) ? vendaRes[0] : vendaRes;
     for (var i = 0; i < carrinho.length; i++) {
@@ -1270,6 +1306,8 @@ async function finalizarVenda() {
       }
     }
     vendas.unshift(venda);
+    vendaEditandoId = null;
+    vendaEditandoItensOriginais = {};
     showMsg('msgPdv', 'Venda registrada!', 'ok');
     setTimeout(function() { fecharMo('moPdvPagamento'); carrinho = []; renderAll(); }, 800);
   } catch(e) { showMsg('msgPdv', 'Erro: ' + e.message, 'err'); }
@@ -1300,6 +1338,8 @@ async function editarVenda(id) {
   if (!v) return;
   try {
     var itens = await sb('venda_itens?venda_id=eq.' + id + '&order=created_at.asc');
+    // So carrega os itens no carrinho pra edicao. NADA é apagado do banco ainda -
+    // a venda original so é substituida quando "Finalizar" for confirmado de novo.
     carrinho = itens.map(function(i) {
       return {
         prodId: i.produto_id,
@@ -1310,20 +1350,13 @@ async function editarVenda(id) {
         custoUnit: +i.preco_custo || 0
       };
     });
-    for (var j = 0; j < itens.length; j++) {
-      var item = itens[j];
-      var prod = produtos.find(function(p) { return p.id === item.produto_id; });
-      if (prod) {
-        var novoEst = (+prod.estoque_atual || 0) + (+item.quantidade || 0);
-        await sb('produtos?id=eq.' + item.produto_id, {method:'PATCH', body:JSON.stringify({estoque_atual:novoEst})});
-        prod.estoque_atual = novoEst;
-      }
-    }
-    await sb('venda_itens?venda_id=eq.' + id, {method:'DELETE'});
-    await sb('vendas?id=eq.' + id, {method:'DELETE'});
-    vendas = vendas.filter(function(x) { return x.id !== id; });
+    vendaEditandoId = id;
+    vendaEditandoItensOriginais = {};
+    itens.forEach(function(i) {
+      vendaEditandoItensOriginais[i.produto_id] = (vendaEditandoItensOriginais[i.produto_id] || 0) + (+i.quantidade || 0);
+    });
     renderPDV();
-    abrirPagamento();
+    abrirPagamento(+v.desconto || 0);
   } catch(e) { alert('Erro ao editar: ' + e.message); }
 }
 
